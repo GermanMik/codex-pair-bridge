@@ -1,51 +1,102 @@
+<div align="center">
+
 # Codex PAIR Bridge
 
-Consult your own local models from Codex through NVIDIA PAIR.
+### Your local models, one conversation with Codex.
 
-**Codex → local MCP bridge → your PAIR router → your model servers**
+[English](README.md) · [Русский](README.ru.md) · [Installation](#get-started) · [Troubleshooting](#troubleshooting)
 
-This is an independent community project, not an official OpenAI or NVIDIA product.
-It does not provide models or access to the author's computers.
+![How Codex uses MCP tools to ask local models through PAIR](docs/assets/mcp-explained.png)
 
-## Install in Codex
+[![Tests](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
 
-Prerequisites:
-- Codex with plugin marketplace support.
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) on your PATH. Restart the Codex app after installing uv.
-- Your PAIR router running, with at least one working chat model.
+</div>
+
+Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **Codex PAIR Bridge gives Codex two tools for talking to your own PAIR router.**
+
+Independent community project. Not affiliated with or endorsed by OpenAI or NVIDIA.
+
+## What does MCP actually do?
+
+**MCP means Model Context Protocol.** It is the interface through which Codex discovers tools and calls them. In this project, a small MCP server runs on your computer and exposes two tools: list models and ask a model.
+
+Think of the workflow as four jobs:
+
+| Component | Its job | Example |
+| --- | --- | --- |
+| **Codex** | Understand your task and use the returned answer. | “I need a second opinion on this function.” |
+| **MCP bridge** | Make model access available as tools. | Call `pair_ask` with a model ID and text. |
+| **PAIR** | Route the request to the selected model. | Send the request to a connected model server. |
+| **Local model** | Generate an answer. | Return review comments to Codex. |
+
+**MCP is the tool connection; PAIR is the model router.** The bridge does not turn a local model into the main Codex model. Codex continues coordinating your task, and the consulted model returns text for Codex to assess.
+
+## A real example
+
+> **You:** “Ask a local model through PAIR to review this function for edge cases.”
+>
+> **Codex:** Reads the current model list, selects an appropriate chat model, and sends the relevant code through the bridge.
+>
+> **Local model:** Returns its review.
+>
+> **Codex:** Checks the suggestions against your code and explains which changes are worth making.
+
+The consulted model receives the text passed to the tool. This bridge gives it no shell tools or direct access to your files.
+
+## Get started
+
+### 1 · Prepare your local models
+
+You need:
+
+- **Codex** with plugin marketplace support.
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** installed and available on your PATH.
+- **PAIR running**, connected to a model server with at least one working chat model.
+
+After installing uv, restart Codex so it can discover it. Confirm uv is available with `uv --version`.
+
+### 2 · Install the plugin
+
+Run these commands in a terminal:
 
 ```sh
 codex plugin marketplace add GermanMik/codex-pair-bridge
 codex plugin add codex-pair-bridge@codex-pair-bridge
 ```
 
-Open a **new Codex task** and ask: “Show available models through PAIR.”
-The first launch downloads the locked Python dependencies and, if necessary, a
-compatible Python runtime. Later launches reuse uv's cache.
+This adds our GitHub marketplace to Codex. It is a community catalog, separate from OpenAI's universal plugin directory. [About plugin marketplaces](https://developers.openai.com/plugins/build/plugins).
 
-This adds a community marketplace source; it does not add the plugin to OpenAI's
-universal public directory. Source: [Codex plugin documentation](https://developers.openai.com/plugins/build/plugins).
+The first tool launch downloads the locked dependencies and, if needed, a compatible Python runtime. Subsequent launches reuse the cache.
 
-## Use
+### 3 · Start a new Codex task
 
-- “Show available models through PAIR.”
-- “Ask `<exact model ID>` through PAIR to review this code.”
-- “Compare two local models' answers, one at a time.”
+Write:
 
-| Tool | Purpose |
+> Show available models through PAIR.
+
+Then use an **exact model ID** from that list:
+
+> Ask `<model ID>` through PAIR to explain this function and check its edge cases.
+
+You should get a model answer that Codex can use in the conversation. The model list alone does not confirm that every listed model can load successfully.
+
+## Prompts to try
+
+| Goal | Ask Codex |
 | --- | --- |
-| `pair_list_models` | Read the current PAIR catalog. |
-| `pair_ask_model` | Send text to an exact model ID, with an optional output token limit. |
+| Discover models | “Show available models through PAIR.” |
+| Review code | “Ask `<model ID>` through PAIR to review this code for bugs.” |
+| Get another approach | “Ask a local model for an alternative, then evaluate its suggestion.” |
+| Compare answers | “Ask two available chat models the same question, one at a time, and compare.” |
 
-Codex remains the coordinator. Consulted models return text and do not receive
-shell tools or file access from this bridge. Their advice still needs verification.
+Replace `<model ID>` with a name from the current catalog. Model names differ between installations.
 
-## Configure your router
+## Connect your PAIR router
 
-Default: `http://127.0.0.1:1234/v1`. This is the PAIR proxy in the tested setup;
-your actual port may differ. Use PAIR's endpoint, not an individual engine's port.
+The default address is **`http://127.0.0.1:1234/v1`**. This is the PAIR proxy in the tested setup. Check the endpoint displayed by your PAIR installation if it uses a different port.
 
-Optionally create `.codex-pair-bridge.json` in your home directory:
+To change it, create **`.codex-pair-bridge.json` in your home directory**:
 
 ```json
 {
@@ -53,55 +104,91 @@ Optionally create `.codex-pair-bridge.json` in your home directory:
 }
 ```
 
-Alternatively, set `PAIR_BASE_URL` in the environment inherited by Codex. It takes
-precedence over the file. If your endpoint requires a bearer token, set
-`PAIR_API_KEY` in that environment. Never put credentials inside the URL.
-The repository contains no personal endpoint settings or credentials.
+| System | Configuration file |
+| --- | --- |
+| macOS / Linux | `~/.codex-pair-bridge.json` |
+| Windows | `%USERPROFILE%\.codex-pair-bridge.json` |
 
-The bridge runs on the machine running Codex. A router reachable from one machine
-may not be reachable from another; `127.0.0.1` always means that local machine.
+Use your **PAIR router's endpoint**. An individual LM Studio endpoint only provides that server's models. `127.0.0.1` refers to the computer running the bridge.
 
-## Behavior and limitations
+<details>
+<summary><strong>Environment variables and authentication</strong></summary>
 
-- Refreshes the catalog before each inference and requires an exact model ID.
-- Rejects likely embedding/draft models for chat. Type hints are inferred from
-  names because the PAIR catalog does not always report types.
-- A catalog entry is not a guarantee that the model is loaded or healthy.
-- Only one inference at a time across this user's bridge processes. This does not
-  limit requests from other applications or users.
-- No automatic retries, fallback models, or model downloads. The model engine may
-  load an already installed model and consume GPU/RAM.
-- Default output limit: 2,048 tokens; configurable from 32 to 8,192. Input limit:
-  48,000 characters. Individual model context limits still apply.
-- HTTP timeout: 180 seconds. An upstream job may keep running after a timeout;
-  check PAIR before trying again. Cancelling a Codex call is not a guarantee of
-  cancelling the model job.
-- Errors are surfaced without echoing raw error bodies. An empty final answer is
-  an error; a response stopped by the token limit is marked as truncated.
-- The bridge does not change model settings, repair PAIR catalogs, or expose a
-  public server.
+`PAIR_BASE_URL` overrides the configuration file. Set it in the environment inherited by Codex.
 
-The original bridge was tested with real PAIR requests to Ornith MLX on macOS and
-Qwen on a Windows node. The portable release has automated OS-matrix tests;
-passing those tests does not certify every PAIR/model/OS combination.
+If your endpoint requires a bearer token, set `PAIR_API_KEY` in that environment. Credentials must not be embedded in the URL or committed to the repository.
 
-## Development
+</details>
+
+## What stays local?
+
+The bridge runs on your computer and sends requests to **your configured PAIR endpoint**. PAIR can route them to your connected model servers. The project maintainer receives no requests through this plugin.
+
+**The complete Codex conversation is not necessarily local.** Model answers return to Codex and follow your Codex/OpenAI data settings. PAIR and model servers may also keep their own logs. [Read the privacy note](PRIVACY.md).
+
+## Troubleshooting
+
+| What you see | What to check |
+| --- | --- |
+| Tools do not appear | Open a new task; verify the plugin is enabled and `uv` is on Codex's PATH. |
+| Cannot reach PAIR | Start PAIR and check its endpoint against the configuration file. |
+| A model is listed but fails | Inspect PAIR's job details and model-server logs. Catalog entries are not health checks. |
+| HTTP 400 or 500 | Check the exact model ID, model loading, memory availability, and server errors. |
+| Another request is running | Wait for the current bridge call to finish. |
+| Timeout | Check PAIR before retrying: the model job may still be running. |
+| No final text | The model may have spent its output budget on reasoning; inspect the result before choosing a larger budget. |
+
+## Tool reference
+
+| Tool | Inputs | Returns |
+| --- | --- | --- |
+| `pair_list` | None | Current model IDs and inferred type hints. |
+| `pair_ask` | `model`, `prompt`, optional `max_tokens` | Answer, reported model ID, completion status, elapsed time and usage when supplied by the server. |
+
+<details>
+<summary><strong>Limits and request behavior</strong></summary>
+
+- Exact model IDs only; the catalog is refreshed before inference.
+- Likely embedding and draft models are rejected for chat. Type hints are inferred from names.
+- One inference at a time across this user's bridge processes. Other applications are outside this limit.
+- No automatic retries, fallback models, or model downloads. The engine may load an already installed model and consume GPU/RAM.
+- Default output budget: 2,048 tokens; allowed range: 32–8,192. Input: up to 48,000 characters. Model context limits still apply.
+- Request timeout: 180 seconds. Cancellation or timeout does not guarantee cancellation of the upstream model job.
+- Empty final answers are errors. Answers stopped by the output budget are marked as truncated.
+- The bridge does not change engine settings or repair model catalogs.
+
+</details>
+
+## Update from an earlier version
+
+```sh
+codex plugin marketplace upgrade codex-pair-bridge
+codex plugin add codex-pair-bridge@codex-pair-bridge
+```
+
+Open a new task after updating. Version 0.3.0 shortens the tools to **`pair_list`** and **`pair_ask`**; update any saved prompts that use the old names.
+
+## For contributors
 
 ```sh
 cd plugins/codex-pair-bridge
 uv run --locked --script ./scripts/server.py --self-test
 ```
 
-Tests cover MCP initialization/schema validation, configuration, HTTP error and
-timeout handling without retries, inference locking, and response parsing.
-Dependencies are recorded in `scripts/server.py.lock`; update intentionally with
-`uv lock --script scripts/server.py` and rerun tests.
+Nine tests cover MCP initialization, argument validation, configuration, errors, timeouts, locking and response parsing. They pass on **macOS, Windows and Linux**. Real PAIR requests have also been tested from macOS with local Ornith and Qwen on a Windows node; this does not certify every model/server combination.
 
-## Remove
+Dependencies are locked in `scripts/server.py.lock`. Update intentionally with `uv lock --script scripts/server.py`, then rerun tests.
+
+<details>
+<summary><strong>Uninstall</strong></summary>
 
 ```sh
 codex plugin remove codex-pair-bridge@codex-pair-bridge
 codex plugin marketplace remove codex-pair-bridge
 ```
 
-[Privacy](PRIVACY.md) · [Security reporting](SECURITY.md) · [MIT license](LICENSE)
+</details>
+
+---
+
+[Report an issue](https://github.com/GermanMik/codex-pair-bridge/issues) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [MIT license](LICENSE)

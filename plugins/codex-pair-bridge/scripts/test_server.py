@@ -39,14 +39,14 @@ class BridgeTests(unittest.TestCase):
 
     def test_content_parts_and_truncation(self):
         with patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), patch.object(server, 'request', return_value={'model': 'model', 'choices': [{'message': {'content': [{'type': 'text', 'text': 'answer'}]}, 'finish_reason': 'length'}]}):
-            result = server.pair_ask_model('model', 'test')
+            result = server.pair_ask('model', 'test')
             self.assertEqual(result['answer'], 'answer')
             self.assertTrue(result['truncated'])
 
     def test_empty_answer_is_failure(self):
         with patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), patch.object(server, 'request', return_value={'choices': [{'message': {'content': None, 'reasoning_content': 'private reasoning'}, 'finish_reason': 'length'}]}):
             with self.assertRaisesRegex(ValueError, 'no final text'):
-                server.pair_ask_model('model', 'test')
+                server.pair_ask('model', 'test')
 
 class ConfigTests(unittest.TestCase):
     def test_config_file(self):
@@ -74,8 +74,8 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = (await session.list_tools()).tools
-                self.assertEqual({t.name for t in tools}, {'pair_list_models', 'pair_ask_model'})
-                result = await session.call_tool('pair_ask_model', {'model':'model','prompt':'hello','max_tokens':-1})
+                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask'})
+                result = await session.call_tool('pair_ask', {'model':'model','prompt':'hello','max_tokens':-1})
                 self.assertTrue(result.isError)
 
 

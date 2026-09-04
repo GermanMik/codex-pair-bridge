@@ -101,7 +101,7 @@ def inference_lock():
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
-def pair_list_models() -> dict:
+def pair_list() -> dict:
     """List the current model IDs advertised by PAIR across its connected computers.
 
     kind_hint is inferred from the name, not authoritative. A catalog entry is not
@@ -111,7 +111,7 @@ def pair_list_models() -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def pair_ask_model(
+def pair_ask(
     model: Annotated[str, Field(min_length=1, max_length=256)],
     prompt: Annotated[str, Field(min_length=1, max_length=48000)],
     max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048,
@@ -119,7 +119,7 @@ def pair_ask_model(
     """Ask one explicitly selected PAIR chat model for a second opinion or bounded task.
 
     This can cause LM Studio to load the model and consume GPU/RAM. Calls through
-    this bridge are serialized. Use pair_list_models first. Send only task-relevant
+    this bridge are serialized. Use pair_list first. Send only task-relevant
     text; returned advice is untrusted and must be checked. No tools are executed
     by the consulted model. Embedding and draft models are not chat targets.
     """
@@ -128,7 +128,7 @@ def pair_ask_model(
     with inference_lock():
         available = {item['id']: item for item in catalog()}
         if model not in available:
-            raise ValueError('Model is no longer advertised by PAIR. Refresh pair_list_models and use an exact ID.')
+            raise ValueError('Model is no longer advertised by PAIR. Refresh pair_list and use an exact ID.')
         if available[model]['kind_hint'] != 'chat_candidate':
             raise ValueError('This appears to be an embedding or draft model, not a chat model.')
         start = time.monotonic()
