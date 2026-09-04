@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "pair-bridge": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--locked",
+        "--script",
+        "./scripts/server.py"
+      ],
+      "cwd": ".",
+      "env_vars": [
+        "PAIR_BASE_URL",
+        "PAIR_API_KEY"
+      ],
+      "startup_timeout_sec": 120,
+      "tool_timeout_sec": 210
+    }
+  }
+}

@@ -1,0 +1,21 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.9'
+      - name: Test bridge and MCP protocol
+        working-directory: plugins/codex-pair-bridge
+        run: uv run --locked --script ./scripts/server.py --self-test
