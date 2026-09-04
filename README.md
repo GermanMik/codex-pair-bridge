@@ -34,7 +34,7 @@ Think of the workflow as four jobs:
 
 ## A real example
 
-> **You:** “Ask a local model through PAIR to review this function for edge cases.”
+> **You:** “Use `pair_list`, then `pair_ask` to review this function for edge cases.”
 >
 > **Codex:** Reads the current model list, selects an appropriate chat model, and sends the relevant code through the bridge.
 >
@@ -73,11 +73,11 @@ The first tool launch downloads the locked dependencies and, if needed, a compat
 
 Write:
 
-> Show available models through PAIR.
+> Use `pair_list` to show the available models.
 
 Then use an **exact model ID** from that list:
 
-> Ask `<model ID>` through PAIR to explain this function and check its edge cases.
+> Use `pair_ask` with model `<model ID>` to explain this function and check its edge cases.
 
 You should get a model answer that Codex can use in the conversation. The model list alone does not confirm that every listed model can load successfully.
 
@@ -85,10 +85,10 @@ You should get a model answer that Codex can use in the conversation. The model 
 
 | Goal | Ask Codex |
 | --- | --- |
-| Discover models | “Show available models through PAIR.” |
-| Review code | “Ask `<model ID>` through PAIR to review this code for bugs.” |
-| Get another approach | “Ask a local model for an alternative, then evaluate its suggestion.” |
-| Compare answers | “Ask two available chat models the same question, one at a time, and compare.” |
+| Discover models | “Use `pair_list` to show the available models.” |
+| Review code | “Use `pair_ask` with `<model ID>` to review this code for bugs.” |
+| Get another approach | “Use `pair_ask` to ask a model from `pair_list` for an alternative, then evaluate it.” |
+| Compare answers | “Use `pair_list`, then `pair_ask` for two chat models sequentially and compare.” |
 
 Replace `<model ID>` with a name from the current catalog. Model names differ between installations.
 
@@ -137,6 +137,24 @@ The bridge runs on your computer and sends requests to **your configured PAIR en
 | Another request is running | Wait for the current bridge call to finish. |
 | Timeout | Check PAIR before retrying: the model job may still be running. |
 | No final text | The model may have spent its output budget on reasoning; inspect the result before choosing a larger budget. |
+
+## The two commands
+
+These are **MCP tool names used inside Codex**, not terminal commands or slash commands. You can mention them in your message; Codex supplies their structured arguments.
+
+**`pair_list`** — no arguments. Returns the current catalog.
+
+**`pair_ask`** — requires `model` (an exact ID from `pair_list`) and `prompt` (your question). Optional `max_tokens` defaults to `2048`.
+
+Example arguments for `pair_ask` (replace the model ID):
+
+```json
+{
+  "model": "<exact ID from pair_list>",
+  "prompt": "Review this function for edge cases: ...",
+  "max_tokens": 2048
+}
+```
 
 ## Tool reference
 

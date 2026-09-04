@@ -1,6 +1,6 @@
 {
   "name": "codex-pair-bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Consult your local models from Codex through NVIDIA PAIR.",
   "author": {
     "name": "GermanMik"
@@ -8,13 +8,13 @@
   "interface": {
     "displayName": "Codex PAIR Bridge",
     "shortDescription": "Consult your local models through PAIR.",
-    "longDescription": "Independent community bridge connecting Codex to your own NVIDIA PAIR router. Lists available models and sends sequential requests to a selected chat model.",
+    "longDescription": "Independent community bridge connecting Codex to your NVIDIA PAIR router. Use pair_list to discover models and pair_ask to query a selected chat model.",
     "developerName": "GermanMik",
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": [
-      "Show available models through PAIR.",
-      "Ask a local model to review this code."
+      "Use pair_list to show available models.",
+      "Use pair_ask to ask a model from pair_list to review this code."
     ]
   },
   "mcpServers": "./.mcp.json",
