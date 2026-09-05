@@ -74,7 +74,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = (await session.list_tools()).tools
-                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask'})
+                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload'})
                 result = await session.call_tool('pair_ask', {'model':'model','prompt':'hello','max_tokens':-1})
                 self.assertTrue(result.isError)
 

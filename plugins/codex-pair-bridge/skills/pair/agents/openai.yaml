@@ -1,0 +1,4 @@
+interface:
+  display_name: "pair"
+  short_description: "Manage PAIR models across your devices"
+  default_prompt: "Use $pair to inspect my devices and available models."

@@ -2,7 +2,43 @@
 
 # Codex PAIR Bridge
 
-### Your local models, one conversation with Codex.
+### /pair: manage models on your devices (0.4.0)
+
+Type `/pair` and select the **pair** skill in Codex's slash menu, or mention `$pair`. Start a new task after installing the update. Astra, Sol, and other tool-capable Codex models can use the same skill.
+
+- `/pair` — inspect the routing catalog and configured devices without changing models.
+- `/pair load an installed model on pc and ask it to review this function` — inspect, select, load, then query the exact device.
+- `/pair unload the model you loaded for this task` — free that instance's memory, keeping weights on disk.
+
+Configure **native LM Studio API origins**, not PAIR proxy URLs, in `~/.codex-pair-bridge.json`:
+
+```json
+{
+  "base_url": "http://127.0.0.1:1234/v1",
+  "devices": [
+    {"id": "mac", "engine": "lmstudio", "base_url": "http://127.0.0.1:1235"},
+    {"id": "pc", "engine": "lmstudio", "base_url": "http://127.0.0.1:1235", "ssh_host": "my-pc"}
+  ]
+}
+```
+
+Ports above are examples. Copy the actual native LM Studio endpoint on each machine. LM Studio's `/api/v1/models`, `/load`, and `/unload` support is required (0.4+). Devices are explicitly configured: the bridge does not automatically gain management access to every PAIR peer. Any number of configured devices can be inspected; unreachable ones are reported individually. Ollama management, downloading/deleting weights, and engine/cluster administration are not implemented.
+
+For remote devices, `ssh_host` names an existing OpenSSH config alias. The bridge creates a temporary loopback-only SSH tunnel with host-key checking and batch authentication, then closes it. No remote shell command is run and no public engine port is opened. Configure and verify SSH normally before using the plugin. Direct HTTPS endpoints are also supported. For authenticated engines set `api_key_env` to your token's environment-variable name and ensure that variable is passed to the MCP process (add its name to `.mcp.json` `env_vars` if necessary); never put tokens in prompts.
+
+| Tool | Purpose |
+| --- | --- |
+| `pair_devices()` | Live installed/loaded inventory for configured devices. |
+| `pair_list(device="pc")` | Native model keys, types, sizes, context limits, loaded instance IDs. |
+| `pair_load(device, model, context_length=8192)` | Load an installed model; reuse existing instances. |
+| `pair_unload(device, instance_id)` | Unload exactly one instance; keep model files. |
+| `pair_ask(model, prompt, device="pc")` | Query that exact device's loaded LLM directly. |
+
+Without `device`, `pair_list` and `pair_ask` retain their PAIR-router behavior. Device-targeted inference bypasses PAIR routing so a load on one machine is not followed by a query on another. The device form of `pair_ask` requires exactly one loaded instance of the selected key.
+
+Load, unload, and inference share a lock on this client machine; other users and applications are outside that lock. Unloading can disrupt their work. Engine auto-eviction remains in effect. A timeout may leave an operation running; inspect state instead of automatically retrying. `not_confirmed` means the requested state was not observed.
+
+## Your local models, one conversation with Codex.
 
 [English](README.md) · [Русский](README.ru.md) · [Installation](#get-started) · [Troubleshooting](#troubleshooting)
 
@@ -13,13 +49,13 @@
 
 </div>
 
-Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **Codex PAIR Bridge gives Codex two tools for talking to your own PAIR router.**
+Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **Codex PAIR Bridge gives Codex tools for consulting PAIR and managing configured LM Studio devices.**
 
 Independent community project. Not affiliated with or endorsed by OpenAI or NVIDIA.
 
 ## What does MCP actually do?
 
-**MCP means Model Context Protocol.** It is the interface through which Codex discovers tools and calls them. In this project, a small MCP server runs on your computer and exposes two tools: list models and ask a model.
+**MCP means Model Context Protocol.** It is the interface through which Codex discovers tools and calls them. In this project, a small MCP server runs on your computer and exposes tools for discovery, model lifecycle, and inference.
 
 Think of the workflow as four jobs:
 
@@ -138,11 +174,11 @@ The bridge runs on your computer and sends requests to **your configured PAIR en
 | Timeout | Check PAIR before retrying: the model job may still be running. |
 | No final text | The model may have spent its output budget on reasoning; inspect the result before choosing a larger budget. |
 
-## The two commands
+## Router commands
 
 These are **MCP tool names used inside Codex**, not terminal commands or slash commands. You can mention them in your message; Codex supplies their structured arguments.
 
-**`pair_list`** — no arguments. Returns the current catalog.
+**`pair_list`** — without arguments, returns the PAIR routing catalog. With `device`, returns native device inventory.
 
 **`pair_ask`** — requires `model` (an exact ID from `pair_list`) and `prompt` (your question). Optional `max_tokens` defaults to `2048`.
 
@@ -173,7 +209,7 @@ Example arguments for `pair_ask` (replace the model ID):
 - Default output budget: 2,048 tokens; allowed range: 32–8,192. Input: up to 48,000 characters. Model context limits still apply.
 - Request timeout: 180 seconds. Cancellation or timeout does not guarantee cancellation of the upstream model job.
 - Empty final answers are errors. Answers stopped by the output budget are marked as truncated.
-- The bridge does not change engine settings or repair model catalogs.
+- The bridge does not change persistent engine settings or repair model catalogs. Explicit loads can set context length.
 
 </details>
 
@@ -193,7 +229,7 @@ cd plugins/codex-pair-bridge
 uv run --locked --script ./scripts/server.py --self-test
 ```
 
-Nine tests cover MCP initialization, argument validation, configuration, errors, timeouts, locking and response parsing. They pass on **macOS, Windows and Linux**. Real PAIR requests have also been tested from macOS with local Ornith and Qwen on a Windows node; this does not certify every model/server combination.
+Tests cover MCP initialization, argument validation, configuration, errors, timeouts, locking and response parsing. CI runs on **macOS, Windows and Linux**. Real PAIR requests have also been tested from macOS with local Ornith and Qwen on a Windows node; this does not certify every model/server combination.
 
 Dependencies are locked in `scripts/server.py.lock`. Update intentionally with `uv lock --script scripts/server.py`, then rerun tests.
 

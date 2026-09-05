@@ -13,3 +13,5 @@ download services to obtain dependencies.
 
 Only send data you intend to share with your configured model servers and Codex.
 The project maintainer does not receive your requests through this plugin.
+
+With configured devices, the bridge also sends inventory, load, unload and device-targeted inference requests directly to LM Studio. Remote loopback endpoints use temporary SSH tunnels and existing OpenSSH configuration; no remote shell is executed. Device API credentials are read from named environment variables. Device addresses stay in the local user configuration.

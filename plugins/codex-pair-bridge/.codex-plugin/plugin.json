@@ -1,6 +1,6 @@
 {
   "name": "codex-pair-bridge",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Consult your local models from Codex through NVIDIA PAIR.",
   "author": {
     "name": "GermanMik"
@@ -8,7 +8,7 @@
   "interface": {
     "displayName": "Codex PAIR Bridge",
     "shortDescription": "Consult your local models through PAIR.",
-    "longDescription": "Independent community bridge connecting Codex to your NVIDIA PAIR router. Use pair_list to discover models and pair_ask to query a selected chat model.",
+    "longDescription": "Use /pair to inspect configured LM Studio devices, load and unload installed models, and consult models through PAIR or on an exact device.",
     "developerName": "GermanMik",
     "category": "Productivity",
     "capabilities": [],
@@ -20,5 +20,6 @@
   "mcpServers": "./.mcp.json",
   "license": "MIT",
   "repository": "https://github.com/GermanMik/codex-pair-bridge",
-  "homepage": "https://github.com/GermanMik/codex-pair-bridge"
+  "homepage": "https://github.com/GermanMik/codex-pair-bridge",
+  "skills": "./skills"
 }

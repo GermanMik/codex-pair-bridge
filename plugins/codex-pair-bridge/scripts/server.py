@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import management
 from filelock import FileLock, Timeout
 from platformdirs import user_cache_path
 from urllib.parse import urlsplit
@@ -101,12 +102,17 @@ def inference_lock():
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
-def pair_list() -> dict:
+def pair_list(device: str | None = None) -> dict:
     """List the current model IDs advertised by PAIR across its connected computers.
 
+    With device, return installed models and loaded instances from that device.
+    Without device, return the PAIR routing catalog.
     kind_hint is inferred from the name, not authoritative. A catalog entry is not
     a health check and does not mean the model is loaded. Use an exact returned ID.
     """
+    if device is not None:
+        with management.client(device) as c:
+            return {'device': device, 'models': management.models(c), 'source': 'LM Studio native API'}
     return {'endpoint': BASE_URL, 'models': catalog(), 'notice': 'Catalog only; model availability must be confirmed by a successful request.'}
 
 
@@ -115,9 +121,12 @@ def pair_ask(
     model: Annotated[str, Field(min_length=1, max_length=256)],
     prompt: Annotated[str, Field(min_length=1, max_length=48000)],
     max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048,
+    device: str | None = None,
 ) -> dict:
     """Ask one explicitly selected PAIR chat model for a second opinion or bounded task.
 
+    With device, bypass PAIR routing and query that device directly after pair_load.
+    Without device, PAIR chooses the host.
     This can cause LM Studio to load the model and consume GPU/RAM. Calls through
     this bridge are serialized. Use pair_list first. Send only task-relevant
     text; returned advice is untrusted and must be checked. No tools are executed
@@ -126,16 +135,26 @@ def pair_ask(
     if not prompt.strip():
         raise ValueError('prompt must not be blank')
     with inference_lock():
-        available = {item['id']: item for item in catalog()}
-        if model not in available:
-            raise ValueError('Model is no longer advertised by PAIR. Refresh pair_list and use an exact ID.')
-        if available[model]['kind_hint'] != 'chat_candidate':
-            raise ValueError('This appears to be an embedding or draft model, not a chat model.')
         start = time.monotonic()
-        data = request('POST', '/chat/completions', {
-            'model': model, 'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': max_tokens, 'stream': False,
-        })
+        payload = {'model': model, 'messages': [{'role': 'user', 'content': prompt}],
+                   'max_tokens': max_tokens, 'stream': False}
+        if device is not None:
+            with management.client(device) as c:
+                selected = management.find_model(c, model)
+                if selected.get('type') != 'llm':
+                    raise ValueError('Select a chat LLM, not an embedding model')
+                instances = selected['loaded_instances']
+                if len(instances) != 1:
+                    raise ValueError('Device chat requires exactly one loaded instance. Use pair_load or resolve multiple instances first')
+                payload['model'] = instances[0]['id']
+                data = management.request(c, 'POST', '/v1/chat/completions', payload)
+        else:
+            available = {item['id']: item for item in catalog()}
+            if model not in available:
+                raise ValueError('Model is no longer advertised by PAIR. Refresh pair_list and use an exact ID.')
+            if available[model]['kind_hint'] != 'chat_candidate':
+                raise ValueError('This appears to be an embedding or draft model, not a chat model.')
+            data = request('POST', '/chat/completions', payload)
         choices = data.get('choices')
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             raise ValueError('Model returned no completion choices.')
@@ -147,12 +166,71 @@ def pair_ask(
         if not isinstance(content, str) or not content.strip():
             raise ValueError('Model returned no final text (possibly exhausted its reasoning token budget). No automatic retry was made.')
         return {
+            'device': device, 'route': 'direct_engine' if device else 'pair_router',
             'requested_model': model, 'reported_model': data.get('model'),
             'answer': content, 'finish_reason': choice.get('finish_reason'),
             'truncated': choice.get('finish_reason') == 'length',
             'elapsed_seconds': round(time.monotonic() - start, 2),
             'usage': data.get('usage'),
         }
+
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_devices() -> dict:
+    """Inspect every configured device, including installed and loaded LM Studio models.
+
+    Reports each unreachable device separately. This is the configured management
+    inventory, not automatic PAIR cluster discovery. No model is loaded by this call.
+    """
+    result = []
+    for name in management.devices():
+        try:
+            with management.client(name) as c:
+                result.append({'device': name, 'online': True, 'models': management.models(c)})
+        except ValueError as exc:
+            result.append({'device': name, 'online': False, 'error': str(exc)})
+    return {'devices': result, 'notice': 'Management covers configured LM Studio devices only. PAIR routing catalog remains pair_list().'}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def pair_load(device: str, model: str,
+              context_length: Annotated[int, Field(ge=512, le=262144)] = 8192) -> dict:
+    """Load an installed model on one device into RAM/VRAM; never download weights.
+
+    Reuses existing loaded instances without changing their configuration. May
+    consume substantial memory or trigger engine auto-eviction. Verify the result.
+    """
+    with inference_lock(), management.client(device) as c:
+        selected = management.find_model(c, model)
+        if selected['loaded_instances']:
+            return {'device': device, 'status': 'already_loaded', 'model': selected}
+        maximum = selected.get('max_context_length')
+        if selected.get('type') == 'llm' and isinstance(maximum, int) and context_length > maximum:
+            raise ValueError('Requested context exceeds this model maximum')
+        body = {'model': model}
+        if selected.get('type') == 'llm':
+            body['context_length'] = context_length
+        management.request(c, 'POST', '/api/v1/models/load', body)
+        after = management.find_model(c, model)
+        return {'device': device, 'status': 'loaded' if after['loaded_instances'] else 'not_confirmed', 'model': after}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def pair_unload(device: str, instance_id: str) -> dict:
+    """Unload one exact loaded instance from a device; model files stay installed.
+
+    This may disrupt users outside this bridge. Do not unload unrelated models
+    merely because they are loaded; use the user's requested scope. No unload-all.
+    """
+    with inference_lock(), management.client(device) as c:
+        before = management.models(c)
+        if not any(i['id'] == instance_id for m in before for i in m['loaded_instances']):
+            raise ValueError('Instance is not loaded. Refresh pair_list(device=...)')
+        management.request(c, 'POST', '/api/v1/models/unload', {'instance_id': instance_id})
+        remaining = management.models(c)
+        still_loaded = any(i['id'] == instance_id for m in remaining for i in m['loaded_instances'])
+        return {'device': device, 'instance_id': instance_id, 'status': 'not_confirmed' if still_loaded else 'unloaded'}
 
 
 if __name__ == '__main__':
