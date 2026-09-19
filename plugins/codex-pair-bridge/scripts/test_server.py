@@ -175,6 +175,15 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['results'][0]['answer'], 'A')
         self.assertEqual(result['results'][1], {'device': 'pc', 'model': 'b', 'error': 'offline'})
 
+    def test_compare_marks_disagreement_unverified(self):
+        first = {'device': 'mac', 'answer': '- Input validation is missing at line 12\n- Cache can race on writes'}
+        second = {'device': 'pc', 'answer': '- Input validation is missing at line 12\n- Cache writes use a lock'}
+        with patch.object(server, 'pair_smart_ask', side_effect=[first, second]):
+            result = server.pair_compare('review', 'a', 'mac', 'b', 'pc')
+        self.assertEqual(len(result['shared_observations']), 1)
+        self.assertEqual(len(result['disputed_observations']), 2)
+        self.assertEqual(result['verification_status'], 'requires_codex_source_review')
+
     def test_download_requires_repeated_exact_model(self):
         with patch.object(server.management, 'devices', return_value={'mac': {}}), patch.object(server.management, 'client') as factory:
             plan = server.pair_download_plan('mac', 'actual/model', 1000000, '/reviewed/models')

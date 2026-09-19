@@ -9,3 +9,5 @@ files. Jev is an optional external decision service, not a local chat model; cal
 `pair_decide` only after the user explicitly chooses external transmission.
 
 For automatic selection, map code requests to `task_hint=code`, speed requests to `fast`, long documents to `long_context`, and text analysis to `analysis`. Pass any explicitly named device/model to `pair_smart_ask`.
+
+After `pair_compare`, verify each disputed code claim by reading the source files before reporting it. Shared text is not proof either.

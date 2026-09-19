@@ -46,6 +46,6 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 - [x] 5. Redacted per-request diagnostics (`docs/proof/05-diagnostics.md`).
 - [x] 1. Live inventory and in-lock recheck (`docs/proof/01-inventory.md`).
 - [x] 2. Profile-based installed-model selection (`docs/proof/02-profiles.md`).
-- [ ] 3. Source-verified two-model comparison.
+- [x] 3. Two-model comparison with provenance and explicit source-verification workflow; actual findings require Codex file review.
 - [ ] 4. Resource management across configured devices.
 - [ ] 6. Project rename to pair-bridge.

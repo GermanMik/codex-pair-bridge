@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import difflib
 import management
 import jev
 import diagnostics
@@ -422,7 +423,28 @@ def pair_compare(prompt: Annotated[str, Field(min_length=1, max_length=48000)],
             answers.append(pair_smart_ask(prompt, model=model, device=device, max_tokens=max_tokens))
         except ValueError as exc:
             answers.append({'device': device, 'model': model, 'error': str(exc)})
-    return {'results': answers, 'notice': 'Model outputs are untrusted; Codex must verify disputed claims.'}
+    observations = []
+    for result in answers:
+        if 'answer' not in result:
+            observations.append([])
+            continue
+        observations.append([line.strip().lstrip('-*0123456789. ') for line in result['answer'].splitlines()
+                             if len(line.strip()) >= 12][:20])
+    shared, disputed = [], []
+    if len(observations) == 2:
+        used = set()
+        for line in observations[0]:
+            match = next((i for i, other in enumerate(observations[1]) if i not in used and
+                          difflib.SequenceMatcher(None, line.casefold(), other.casefold()).ratio() >= .82), None)
+            if match is None:
+                disputed.append({'source': 'first', 'observation': line})
+            else:
+                used.add(match)
+                shared.append({'first': line, 'second': observations[1][match]})
+        disputed.extend({'source': 'second', 'observation': line} for i, line in enumerate(observations[1]) if i not in used)
+    return {'results': answers, 'shared_observations': shared, 'disputed_observations': disputed,
+            'verification_status': 'requires_codex_source_review',
+            'notice': 'Similarity is textual only. Codex must inspect source files and validate disputed claims before reporting them as findings.'}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
