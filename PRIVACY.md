@@ -15,3 +15,5 @@ Only send data you intend to share with your configured model servers and Codex.
 The project maintainer does not receive your requests through this plugin.
 
 With configured devices, the bridge also sends inventory, load, unload and device-targeted inference requests directly to LM Studio. Remote loopback endpoints use temporary SSH tunnels and existing OpenSSH configuration; no remote shell is executed. Device API credentials are read from named environment variables. Device addresses stay in the local user configuration.
+
+The optional `pair_decide` and `pair_score` tools are different: when called with `allow_external=true`, they send the supplied state and Choice or Score question to TypeSafe AI's Jev API. They require a `TYPESAFE_API_KEY`. The bridge never calls Jev automatically as a fallback or for smart model selection. Check TypeSafe AI's privacy terms before sending sensitive data.

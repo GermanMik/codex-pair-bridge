@@ -48,9 +48,12 @@ def endpoint(device):
         yield device['base_url']
         return
     p = urlsplit(device['base_url'])
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        port = s.getsockname()[1]
+    try:
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            port = s.getsockname()[1]
+    except OSError as exc:
+        raise ValueError('Cannot create a local SSH tunnel for this device') from exc
     # SSH configuration supplies authentication. No remote shell is invoked.
     args = ['ssh', '-N', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
             '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=10',

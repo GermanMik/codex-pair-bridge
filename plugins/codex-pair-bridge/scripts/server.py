@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import contextlib
 import management
+import jev
 from filelock import FileLock, Timeout
 from platformdirs import user_cache_path
 from urllib.parse import urlsplit
 import json
 import os
+import re
 import time
+import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -37,6 +40,7 @@ def load_config() -> tuple[str, str | None]:
 
 BASE_URL, API_KEY = load_config()
 TIMEOUT = 180.0
+_DOWNLOAD_PLANS: dict[str, dict] = {}
 mcp = FastMCP(
     'codex-pair-bridge',
     instructions=(
@@ -84,16 +88,68 @@ def catalog() -> list[dict]:
     return result
 
 
+def completion(data: dict, requested_model: str, device: str | None, started: float) -> dict:
+    choices = data.get('choices')
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError('Model returned no completion choices.')
+    choice = choices[0]
+    message = choice.get('message') or {}
+    content = message.get('content') if isinstance(message, dict) else None
+    if isinstance(content, list):
+        content = '\n'.join(p['text'] for p in content if isinstance(p, dict) and isinstance(p.get('text'), str))
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError('Model returned no final text (possibly exhausted its reasoning token budget). No automatic retry was made.')
+    return {
+        'device': device, 'route': 'direct_engine' if device else 'pair_router',
+        'requested_model': requested_model, 'reported_model': data.get('model'),
+        'answer': content, 'finish_reason': choice.get('finish_reason'),
+        'truncated': choice.get('finish_reason') == 'length',
+        'elapsed_seconds': round(time.monotonic() - started, 2), 'usage': data.get('usage'),
+    }
+
+
+def select_model(inventory: list[dict], model: str | None = None, device: str | None = None,
+                 context_length: int = 8192, task_hint: str = 'general',
+                 max_load_bytes: int | None = None) -> tuple[str, dict]:
+    """Deterministic selection from a fresh, native installed-model inventory."""
+    candidates = []
+    for row in inventory:
+        if not row.get('online') or (device is not None and row.get('device') != device):
+            continue
+        for item in row.get('models', []):
+            if item.get('type') != 'llm' or (model is not None and item.get('key') != model):
+                continue
+            limit = item.get('max_context_length')
+            if isinstance(limit, int) and limit < context_length:
+                continue
+            if max_load_bytes is not None and not item['loaded_instances'] and (
+                not isinstance(item.get('size_bytes'), int) or item['size_bytes'] > max_load_bytes
+            ):
+                continue
+            candidates.append((row['device'], item))
+    if not candidates:
+        raise ValueError('No suitable installed chat model on an online configured device; no download was made')
+    # Prefer a reused instance, then smaller weights and a stable device/key ordering.
+    return min(candidates, key=lambda x: (0 if task_hint != 'code' or any(
+                                              term in x[1]['key'].lower() for term in ('code', 'coder', 'devstral')) else 1,
+                                          not bool(x[1]['loaded_instances']),
+                                          x[1].get('size_bytes', 1 << 62), x[0], x[1]['key']))
+
+
 @contextlib.contextmanager
-def inference_lock():
-    # Shared across Codex tasks: do not overlap heavy inference via this bridge.
+def inference_lock(device: str | None = None, wait_seconds: float = 0):
+    # Per-device queues allow independent configured devices to run concurrently.
+    # Router calls have a separate lock because their final host is unknown.
+    if device is not None and not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', device):
+        raise ValueError('Invalid device ID for lock')
     folder = user_cache_path('codex-pair-bridge', appauthor=False)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = FileLock(str(folder / 'inference.lock'), timeout=0)
+    lock = FileLock(str(folder / ('router.lock' if device is None else 'device-' + device + '.lock')),
+                    timeout=wait_seconds)
     try:
         lock.acquire()
     except Timeout as exc:
-        raise ValueError('Another Codex PAIR request is running. Wait for it to finish before calling again.') from exc
+        raise ValueError('Another Codex PAIR request is running on this target. Wait for it to finish before calling again.') from exc
     try:
         yield
     finally:
@@ -134,7 +190,7 @@ def pair_ask(
     """
     if not prompt.strip():
         raise ValueError('prompt must not be blank')
-    with inference_lock():
+    with inference_lock(device):
         start = time.monotonic()
         payload = {'model': model, 'messages': [{'role': 'user', 'content': prompt}],
                    'max_tokens': max_tokens, 'stream': False}
@@ -155,24 +211,7 @@ def pair_ask(
             if available[model]['kind_hint'] != 'chat_candidate':
                 raise ValueError('This appears to be an embedding or draft model, not a chat model.')
             data = request('POST', '/chat/completions', payload)
-        choices = data.get('choices')
-        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-            raise ValueError('Model returned no completion choices.')
-        choice = choices[0]
-        message = choice.get('message') or {}
-        content = message.get('content') if isinstance(message, dict) else None
-        if isinstance(content, list):
-            content = '\n'.join(p['text'] for p in content if isinstance(p, dict) and isinstance(p.get('text'), str))
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError('Model returned no final text (possibly exhausted its reasoning token budget). No automatic retry was made.')
-        return {
-            'device': device, 'route': 'direct_engine' if device else 'pair_router',
-            'requested_model': model, 'reported_model': data.get('model'),
-            'answer': content, 'finish_reason': choice.get('finish_reason'),
-            'truncated': choice.get('finish_reason') == 'length',
-            'elapsed_seconds': round(time.monotonic() - start, 2),
-            'usage': data.get('usage'),
-        }
+        return completion(data, model, device, start)
 
 
 
@@ -201,7 +240,7 @@ def pair_load(device: str, model: str,
     Reuses existing loaded instances without changing their configuration. May
     consume substantial memory or trigger engine auto-eviction. Verify the result.
     """
-    with inference_lock(), management.client(device) as c:
+    with inference_lock(device), management.client(device) as c:
         selected = management.find_model(c, model)
         if selected['loaded_instances']:
             return {'device': device, 'status': 'already_loaded', 'model': selected}
@@ -223,7 +262,7 @@ def pair_unload(device: str, instance_id: str) -> dict:
     This may disrupt users outside this bridge. Do not unload unrelated models
     merely because they are loaded; use the user's requested scope. No unload-all.
     """
-    with inference_lock(), management.client(device) as c:
+    with inference_lock(device), management.client(device) as c:
         before = management.models(c)
         if not any(i['id'] == instance_id for m in before for i in m['loaded_instances']):
             raise ValueError('Instance is not loaded. Refresh pair_list(device=...)')
@@ -231,6 +270,212 @@ def pair_unload(device: str, instance_id: str) -> dict:
         remaining = management.models(c)
         still_loaded = any(i['id'] == instance_id for m in remaining for i in m['loaded_instances'])
         return {'device': device, 'instance_id': instance_id, 'status': 'not_confirmed' if still_loaded else 'unloaded'}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def pair_smart_ask(
+    prompt: Annotated[str, Field(min_length=1, max_length=48000)],
+    model: str | None = None,
+    device: str | None = None,
+    context_length: Annotated[int, Field(ge=512, le=262144)] = 8192,
+    max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048,
+    unload_after: bool = True,
+    task_hint: Annotated[str, Field(pattern='^(general|code|fast)$')] = 'general',
+    max_load_bytes: Annotated[int | None, Field(ge=1)] = None,
+) -> dict:
+    """Select an installed LLM from live device inventories, load if needed, ask once, and clean up only a newly created instance.
+
+    No model downloads or silent fallback. Existing loaded instances are preserved.
+    An ambiguous multi-instance model is not selected automatically.
+    """
+    if not prompt.strip():
+        raise ValueError('prompt must not be blank')
+    try:
+        router_models = {row['id'] for row in catalog()}
+        router_status = 'online'
+    except ValueError:
+        router_models = set()
+        router_status = 'unavailable'
+    snapshot = pair_devices()
+    selected_device, selected = select_model(snapshot['devices'], model, device, context_length,
+                                             task_hint, max_load_bytes)
+    with inference_lock(selected_device, wait_seconds=30):
+        key = selected['key']
+        started = time.monotonic()
+        owned_id = None
+        cleanup = 'not_needed'
+        with management.client(selected_device) as c:
+            # Recheck after selection: another application may have changed the load state.
+            live = management.find_model(c, key)
+            instances = live['loaded_instances']
+            if len(instances) > 1:
+                raise ValueError('Multiple instances of the selected model are loaded; choose and manage one explicitly')
+            if instances:
+                load_config = instances[0].get('config')
+                actual_context = load_config.get('context_length') if isinstance(load_config, dict) else None
+                if isinstance(actual_context, int) and actual_context < context_length:
+                    raise ValueError('Loaded instance context is smaller than requested; choose a smaller context or another model')
+            if not instances:
+                load_result = management.request(c, 'POST', '/api/v1/models/load', {'model': key, 'context_length': context_length})
+                loaded_id = load_result.get('instance_id')
+                if not isinstance(loaded_id, str) or not loaded_id:
+                    raise ValueError('Load response had no instance ID; inspect state before retrying')
+                after = management.find_model(c, key)
+                if len(after['loaded_instances']) != 1 or after['loaded_instances'][0]['id'] != loaded_id:
+                    raise ValueError('Load state is not confirmed; inspect pair_list before retrying')
+                owned_id = loaded_id
+                instances = after['loaded_instances']
+            payload = {'model': instances[0]['id'], 'messages': [{'role': 'user', 'content': prompt}],
+                       'max_tokens': max_tokens, 'stream': False}
+            try:
+                data = management.request(c, 'POST', '/v1/chat/completions', payload)
+                result = completion(data, key, selected_device, started)
+            except Exception:
+                # A timeout may leave inference running. Retain the instance for inspection.
+                raise
+            else:
+                if owned_id and unload_after:
+                    # This lock excludes other bridge calls, but cannot observe external clients.
+                    current = management.find_model(c, key)['loaded_instances']
+                    if len(current) == 1 and current[0]['id'] == owned_id:
+                        try:
+                            management.request(c, 'POST', '/api/v1/models/unload', {'instance_id': owned_id})
+                            confirmed = management.find_model(c, key)['loaded_instances']
+                            cleanup = 'unloaded' if not confirmed else 'not_confirmed'
+                        except ValueError:
+                            cleanup = 'failed_inspect_instance'
+                    else:
+                        cleanup = 'state_changed_preserved'
+                elif owned_id:
+                    cleanup = 'new_instance_retained'
+                else:
+                    cleanup = 'existing_instance_preserved'
+                return dict(result, selected_model=key, instance_id=instances[0]['id'],
+                            loaded_for_request=bool(owned_id), cleanup=cleanup,
+                            router_status=router_status, router_advertises_model=key in router_models)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def pair_compare(prompt: Annotated[str, Field(min_length=1, max_length=48000)],
+                 first_model: str, first_device: str, second_model: str, second_device: str,
+                 max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048) -> dict:
+    """Ask two explicitly named installed models sequentially; preserve both answers for Codex to assess."""
+    if first_model == second_model and first_device == second_device:
+        raise ValueError('Comparison requires two distinct model/device targets')
+    answers = []
+    for model, device in ((first_model, first_device), (second_model, second_device)):
+        try:
+            answers.append(pair_smart_ask(prompt, model=model, device=device, max_tokens=max_tokens))
+        except ValueError as exc:
+            answers.append({'device': device, 'model': model, 'error': str(exc)})
+    return {'results': answers, 'notice': 'Model outputs are untrusted; Codex must verify disputed claims.'}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_diagnose() -> dict:
+    """Read-only device and router health snapshot without prompts, tokens or private URLs."""
+    rows = []
+    for name in management.devices():
+        try:
+            with management.client(name) as c:
+                models = management.models(c)
+            rows.append({'device': name, 'online': True, 'installed': len(models),
+                         'chat_models': sum(m.get('type') == 'llm' for m in models),
+                         'loaded_instances': sum(len(m['loaded_instances']) for m in models)})
+        except ValueError as exc:
+            rows.append({'device': name, 'online': False, 'error': str(exc)})
+    try:
+        advertised = len(catalog())
+        router = {'online': True, 'advertised_models': advertised}
+    except ValueError:
+        router = {'online': False, 'error': 'PAIR router unavailable or catalog invalid'}
+    return {'devices': rows, 'router': router}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_download_plan(device: str, model: str, estimated_size_bytes: Annotated[int, Field(ge=1)],
+                       destination: str, quantization: str | None = None) -> dict:
+    """Prepare a one-use download review. Size and destination are caller supplied, not verified by LM Studio.
+
+    LM Studio's download API reveals total size only after starting. Inspect the model
+    source, expected size and configured storage location independently before planning.
+    """
+    if not model or len(model) > 512 or not destination.strip() or len(destination) > 1024:
+        raise ValueError('Provide an exact model ID and reviewed destination')
+    if quantization is not None and not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}', quantization):
+        raise ValueError('Invalid quantization')
+    if model.startswith('https://'):
+        parts = urlsplit(model)
+        if parts.hostname != 'huggingface.co' or parts.username or parts.password or parts.query or parts.fragment:
+            raise ValueError('Only exact huggingface.co HTTPS links are accepted as model URLs')
+        source = model
+    elif re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', model):
+        source = 'LM Studio catalog: ' + model
+    else:
+        raise ValueError('Use an exact LM Studio catalog ID or huggingface.co model URL')
+    if device not in management.devices():
+        raise ValueError('Unknown device. Use pair_devices and an exact configured ID')
+    plan_id = uuid.uuid4().hex
+    _DOWNLOAD_PLANS[plan_id] = {'device': device, 'model': model, 'quantization': quantization,
+                                'estimated_size_bytes': estimated_size_bytes,
+                                'destination': destination, 'created': time.monotonic()}
+    return {'plan_id': plan_id, 'device': device, 'model': model, 'source': source,
+            'estimated_disk_and_network_bytes': estimated_size_bytes,
+            'destination': destination, 'quantization': quantization,
+            'notice': 'Estimate and destination are caller supplied and unverified. Review free space and LM Studio storage settings before starting. Plan expires in 10 minutes.'}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def pair_download(plan_id: str, confirm_model: str) -> dict:
+    """Start a download from one reviewed plan, with the exact model ID repeated explicitly."""
+    plan = _DOWNLOAD_PLANS.get(plan_id)
+    if not plan or time.monotonic() - plan['created'] > 600:
+        raise ValueError('Download plan is missing or expired; prepare a new plan')
+    if plan['model'] != confirm_model:
+        raise ValueError('Repeat the exact model ID in confirm_model before starting a download')
+    del _DOWNLOAD_PLANS[plan_id]
+    device, model, quantization = plan['device'], plan['model'], plan['quantization']
+    with management.client(device) as c:
+        body = {'model': model}
+        if quantization:
+            body['quantization'] = quantization
+        result = management.request(c, 'POST', '/api/v1/models/download', body)
+    return {'device': device, 'model': model, 'job_id': result.get('job_id'),
+            'status': result.get('status'), 'total_size_bytes': result.get('total_size_bytes')}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_download_status(device: str, job_id: str) -> dict:
+    """Read the progress of an explicitly started LM Studio download job."""
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', job_id):
+        raise ValueError('Invalid download job ID')
+    with management.client(device) as c:
+        result = management.request(c, 'GET', '/api/v1/models/download/status/' + job_id)
+    return {'device': device, 'job_id': job_id, **{k: result[k] for k in
+            ('status', 'total_size_bytes', 'downloaded_bytes', 'bytes_per_second', 'estimated_completion') if k in result}}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def pair_decide(state: Annotated[str, Field(min_length=1, max_length=48000)],
+                instructions: Annotated[str, Field(min_length=1, max_length=1000)],
+                criteria: dict[str, str], allow_external: bool = False) -> dict:
+    """Ask optional cloud Jev for one typed Choice decision, only with explicit external-send opt-in.
+
+    This is not a chat model and is never an implicit fallback for pair_ask.
+    The state is sent to TypeSafe AI, not to local PAIR devices.
+    """
+    return jev.decide(state, instructions, criteria, allow_external=allow_external)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def pair_score(state: Annotated[str, Field(min_length=1, max_length=48000)],
+               instructions: Annotated[str, Field(min_length=1, max_length=1000)],
+               levels: list[str], allow_external: bool = False) -> dict:
+    """Ask external TypeSafe AI Jev to score a bounded state on ordered rubric levels.
+
+    Requires explicit allow_external=true; never invoked by local model routing.
+    """
+    return jev.score(state, instructions, levels, allow_external=allow_external)
 
 
 if __name__ == '__main__':

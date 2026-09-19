@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 import httpx
 import server
+import jev
 
 
 class BridgeTests(unittest.TestCase):
@@ -37,6 +38,14 @@ class BridgeTests(unittest.TestCase):
                 with server.inference_lock():
                     self.fail('lock was not held')
 
+    def test_device_locks_are_independent(self):
+        with server.inference_lock('mac'):
+            with server.inference_lock('pc'):
+                pass
+            with self.assertRaisesRegex(ValueError, 'this target'):
+                with server.inference_lock('mac'):
+                    self.fail('same device overlapped')
+
     def test_content_parts_and_truncation(self):
         with patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), patch.object(server, 'request', return_value={'model': 'model', 'choices': [{'message': {'content': [{'type': 'text', 'text': 'answer'}]}, 'finish_reason': 'length'}]}):
             result = server.pair_ask('model', 'test')
@@ -47,6 +56,146 @@ class BridgeTests(unittest.TestCase):
         with patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), patch.object(server, 'request', return_value={'choices': [{'message': {'content': None, 'reasoning_content': 'private reasoning'}, 'finish_reason': 'length'}]}):
             with self.assertRaisesRegex(ValueError, 'no final text'):
                 server.pair_ask('model', 'test')
+
+    def test_selector_prefers_loaded_installed_chat(self):
+        rows = [{'device': 'pc', 'online': False, 'models': [{'key': 'offline', 'type': 'llm', 'loaded_instances': []}]},
+                {'device': 'mac', 'online': True, 'models': [
+                    {'key': 'embed', 'type': 'embedding', 'loaded_instances': []},
+                    {'key': 'cold', 'type': 'llm', 'size_bytes': 1, 'loaded_instances': []},
+                    {'key': 'warm', 'type': 'llm', 'size_bytes': 10, 'loaded_instances': [{'id': 'warm-i'}]}]}]
+        self.assertEqual(server.select_model(rows)[1]['key'], 'warm')
+        with self.assertRaisesRegex(ValueError, 'No suitable installed'):
+            server.select_model(rows, model='gpt-oss-20b')
+
+    def test_smart_ask_preserves_existing_instance(self):
+        row = {'key': 'warm', 'type': 'llm', 'loaded_instances': [{'id': 'warm-i'}]}
+        snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [row]}]}
+        with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'find_model', return_value=row), patch.object(server.management, 'request', return_value={
+                 'model': 'warm', 'choices': [{'message': {'content': 'answer'}, 'finish_reason': 'stop'}]}) as req:
+            factory.return_value.__enter__.return_value = object()
+            result = server.pair_smart_ask('question')
+        self.assertEqual(result['cleanup'], 'existing_instance_preserved')
+        self.assertEqual([x.args[2] for x in req.call_args_list], ['/v1/chat/completions'])
+
+    def test_smart_ask_loads_and_unloads_only_owned_instance(self):
+        cold = {'key': 'cold', 'type': 'llm', 'loaded_instances': []}
+        warm = {'key': 'cold', 'type': 'llm', 'loaded_instances': [{'id': 'owned-i'}]}
+        snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [cold]}]}
+        responses = [cold, warm, warm, {'key': 'cold', 'type': 'llm', 'loaded_instances': []}]
+        def send(_c, _method, route, _body):
+            if route == '/api/v1/models/load':
+                return {'instance_id': 'owned-i'}
+            if route == '/v1/chat/completions':
+                return {'model': 'cold', 'choices': [{'message': {'content': 'answer'}, 'finish_reason': 'stop'}]}
+            return {}
+        with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'find_model', side_effect=responses), patch.object(server.management, 'request', side_effect=send) as req:
+            factory.return_value.__enter__.return_value = object()
+            result = server.pair_smart_ask('question')
+        self.assertEqual(result['cleanup'], 'unloaded')
+        self.assertEqual([x.args[2] for x in req.call_args_list],
+                         ['/api/v1/models/load', '/v1/chat/completions', '/api/v1/models/unload'])
+
+    def test_timeout_retains_new_instance_for_inspection(self):
+        cold = {'key': 'cold', 'type': 'llm', 'loaded_instances': []}
+        warm = {'key': 'cold', 'type': 'llm', 'loaded_instances': [{'id': 'owned-i'}]}
+        snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [cold]}]}
+        def send(_c, _method, route, _body):
+            if route == '/api/v1/models/load':
+                return {'instance_id': 'owned-i'}
+            if route == '/v1/chat/completions':
+                raise ValueError('Device timed out')
+            return {}
+        with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'find_model', side_effect=[cold, warm]), \
+             patch.object(server.management, 'request', side_effect=send) as req:
+            factory.return_value.__enter__.return_value = object()
+            with self.assertRaisesRegex(ValueError, 'timed out'):
+                server.pair_smart_ask('question')
+        self.assertNotIn('/api/v1/models/unload', [x.args[2] for x in req.call_args_list])
+
+    def test_compare_preserves_both_provenances_and_one_failure(self):
+        with patch.object(server, 'pair_smart_ask', side_effect=[{'device': 'mac', 'answer': 'A'}, ValueError('offline')]) as ask:
+            result = server.pair_compare('question', 'a', 'mac', 'b', 'pc')
+        self.assertEqual(ask.call_count, 2)
+        self.assertEqual(result['results'][0]['answer'], 'A')
+        self.assertEqual(result['results'][1], {'device': 'pc', 'model': 'b', 'error': 'offline'})
+
+    def test_download_requires_repeated_exact_model(self):
+        with patch.object(server.management, 'devices', return_value={'mac': {}}), patch.object(server.management, 'client') as factory:
+            plan = server.pair_download_plan('mac', 'actual/model', 1000000, '/reviewed/models')
+            with self.assertRaisesRegex(ValueError, 'Repeat the exact'):
+                server.pair_download(plan['plan_id'], 'other/model')
+            factory.assert_not_called()
+
+    def test_download_plan_is_one_use_and_exposes_review_fields(self):
+        with patch.object(server.management, 'devices', return_value={'mac': {}}), patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'request', return_value={'job_id': 'job1', 'status': 'downloading', 'total_size_bytes': 1100000}):
+            factory.return_value.__enter__.return_value = object()
+            plan = server.pair_download_plan('mac', 'actual/model', 1000000, '/reviewed/models')
+            self.assertEqual(plan['estimated_disk_and_network_bytes'], 1000000)
+            self.assertEqual(plan['source'], 'LM Studio catalog: actual/model')
+            self.assertEqual(plan['destination'], '/reviewed/models')
+            self.assertEqual(server.pair_download(plan['plan_id'], 'actual/model')['job_id'], 'job1')
+            with self.assertRaisesRegex(ValueError, 'missing or expired'):
+                server.pair_download(plan['plan_id'], 'actual/model')
+
+    def test_download_plan_rejects_untrusted_url(self):
+        with patch.object(server.management, 'devices', return_value={'mac': {}}):
+            with self.assertRaisesRegex(ValueError, 'huggingface.co'):
+                server.pair_download_plan('mac', 'https://example.com/model', 100, '/models')
+
+    def test_diagnostics_omits_private_router_url_and_model_names(self):
+        rows = [{'key': 'private-model', 'type': 'llm', 'loaded_instances': [{'id': 'secret-instance'}]}]
+        with patch.object(server.management, 'devices', return_value={'mac': {}}), \
+             patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'models', return_value=rows), \
+             patch.object(server, 'catalog', return_value=[{'id': 'private-model'}]):
+            factory.return_value.__enter__.return_value = object()
+            result = server.pair_diagnose()
+        self.assertEqual(result['devices'][0]['loaded_instances'], 1)
+        self.assertNotIn('private-model', str(result))
+        self.assertNotIn('secret-instance', str(result))
+
+
+class JevTests(unittest.TestCase):
+    def test_external_send_requires_explicit_opt_in(self):
+        with patch.dict(jev.os.environ, {'TYPESAFE_API_KEY': 'secret'}), patch.object(jev.httpx, 'Client') as factory:
+            with self.assertRaisesRegex(ValueError, 'allow_external'):
+                jev.decide('state', 'choose', {'a': 'A', 'b': 'B'}, allow_external=False)
+            factory.assert_not_called()
+
+    def test_choice_response_is_validated(self):
+        with patch.dict(jev.os.environ, {'TYPESAFE_API_KEY': 'secret'}), patch.object(jev.httpx, 'Client') as factory:
+            response = factory.return_value.__enter__.return_value.post.return_value
+            response.is_success = True
+            response.json.return_value = {'model': 'jev-latest', 'answers': {'decision': {
+                'type': 'choice', 'choice': 'a', 'probabilities': {'a': .8, 'b': .2}, 'confidence': .7}}}
+            result = jev.decide('state', 'choose', {'a': 'A', 'b': 'B'}, allow_external=True)
+            self.assertEqual(result['choice'], 'a')
+            self.assertNotIn('secret', str(result))
+
+    def test_score_response_is_validated(self):
+        with patch.dict(jev.os.environ, {'TYPESAFE_API_KEY': 'secret'}), patch.object(jev.httpx, 'Client') as factory:
+            response = factory.return_value.__enter__.return_value.post.return_value
+            response.is_success = True
+            response.json.return_value = {'model': 'jev-latest', 'answers': {'decision': {
+                'type': 'score', 'score': 1.25, 'legend': {'0': 'low', '1': 'medium', '2': 'high'},
+                'probabilities': {'0': .1, '1': .55, '2': .35}, 'confidence': .7}}}
+            result = jev.score('state', 'rate', ['low', 'medium', 'high'], allow_external=True)
+            self.assertEqual(result['score'], 1.25)
+            self.assertEqual(factory.return_value.__enter__.return_value.post.call_args.kwargs['json']['questions']['decision']['type'], 'score')
+            self.assertNotIn('secret', str(result))
+
+    def test_score_rejects_wrong_legend(self):
+        with patch.dict(jev.os.environ, {'TYPESAFE_API_KEY': 'secret'}), patch.object(jev.httpx, 'Client') as factory:
+            response = factory.return_value.__enter__.return_value.post.return_value
+            response.is_success = True
+            response.json.return_value = {'answers': {'decision': {'type': 'score', 'score': 0,
+                'legend': {'0': 'other', '1': 'high'}, 'probabilities': {'0': 1, '1': 0}, 'confidence': 1}}}
+            with self.assertRaisesRegex(ValueError, 'legend'):
+                jev.score('state', 'rate', ['low', 'high'], allow_external=True)
 
 class ConfigTests(unittest.TestCase):
     def test_config_file(self):
@@ -74,7 +223,10 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = (await session.list_tools()).tools
-                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload'})
+                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload',
+                                                          'pair_smart_ask', 'pair_compare', 'pair_diagnose',
+                                                          'pair_download_plan', 'pair_download', 'pair_download_status',
+                                                          'pair_decide', 'pair_score'})
                 result = await session.call_tool('pair_ask', {'model':'model','prompt':'hello','max_tokens':-1})
                 self.assertTrue(result.isError)
 

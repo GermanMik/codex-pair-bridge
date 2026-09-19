@@ -146,7 +146,7 @@ Add native LM Studio API origins to the same configuration file. These are separ
 
 Use the real native API origin from each LM Studio installation; the ports above are examples. `ssh_host` must be an existing OpenSSH config alias. The bridge opens a temporary loopback-only tunnel with host-key checking, runs no remote shell command, and closes the tunnel after the request. A direct HTTPS origin is also supported.
 
-Devices are configured explicitly. PAIR peer discovery does not grant model-management access. Ollama lifecycle management, model downloads and deletion, engine installation, and PAIR cluster administration are outside version 0.4.0.
+Devices are configured explicitly. PAIR peer discovery does not grant model-management access. Ollama lifecycle management, model deletion, engine installation, and PAIR cluster administration are not implemented. The separate `pair_download` tool requires a one-use `pair_download_plan` and the exact model ID repeated in `confirm_model`; it is never used by `pair_ask` or `pair_smart_ask`.
 
 For an authenticated device, set `api_key_env` to the name of an environment variable containing its token and pass that variable to the MCP process through `.mcp.json` `env_vars`. Keep tokens out of configuration committed to Git and out of prompts.
 
@@ -197,14 +197,23 @@ Example arguments for `pair_ask` (replace the model ID):
 | `pair_load` | `device`, `model`, optional `context_length` | Reused or newly loaded instance and its exact instance ID. |
 | `pair_unload` | `device`, `instance_id` | Confirmation that one exact instance is no longer observed. |
 | `pair_ask` | `model`, `prompt`, optional `device`, `max_tokens` | Answer, selected model, completion status, timing and usage when available. |
+| `pair_smart_ask` | `prompt`; optional `model`, `device`, `task_hint`, `context_length`, `max_tokens`, `unload_after` | Chooses from live installed device inventories, loads if needed, asks once and reports cleanup. No download or silent fallback. |
+| `pair_compare` | `prompt`, two exact device/model pairs | Two sequential results with provenance for Codex to verify. |
+| `pair_diagnose` | None | Redacted router and device health summary. |
+| `pair_download_plan` / `pair_download` / `pair_download_status` | Exact model, reviewed size/destination, one-use plan ID, repeated `confirm_model`; job ID | Review source and caller-supplied estimate before a separate explicit start. LM Studio reports actual bytes only after starting; verify free space and storage settings yourself. |
+| `pair_decide` / `pair_score` | State, Choice options or ordered Score levels, `allow_external=true` | Optional typed evaluation from **external** TypeSafe AI Jev; requires `TYPESAFE_API_KEY`. |
+
+The smart path requires at least one explicitly configured, online LM Studio device. It preserves pre-existing loaded instances. An instance loaded for a successful smart request is unloaded by default; an inference error or timeout leaves it loaded for inspection. Other applications can use the same LM Studio server, so Bridge cannot guarantee an instance is idle outside its own calls. Set `unload_after=false` when sharing a model with other clients.
+
+Oh My Pi users can use the same MCP server and a native `/pair` command. See the [OMP setup guide](docs/OMP.md). Jev is a separate cloud decision service, never a local chat fallback; the bridge sends no state to it without an explicit `allow_external=true` call. [TypeSafe API reference](https://docs.typesafe.ai/api).
 
 <details>
 <summary><strong>Limits and request behavior</strong></summary>
 
 - Exact model IDs only; the catalog is refreshed before inference.
 - Likely embedding and draft models are rejected for chat. Type hints are inferred from names.
-- Load, unload, and inference operations are serialized across this user's bridge processes. Other applications are outside this limit.
-- No automatic retries, fallback models, or model downloads. The engine may load an already installed model and consume GPU/RAM.
+- Load, unload, and inference operations are queued per configured device across this user's bridge processes. Router calls use a separate lock because the destination is unknown. Other applications are outside these limits.
+- No automatic retries, fallback models, or downloads during a model request. The engine may load an already installed model and consume GPU/RAM.
 - Default output budget: 2,048 tokens; allowed range: 32–8,192. Input: up to 48,000 characters. Model context limits still apply.
 - Request timeout: 180 seconds. Cancellation or timeout does not guarantee cancellation of the upstream model job.
 - Empty final answers are errors. Answers stopped by the output budget are marked as truncated.
@@ -220,7 +229,7 @@ codex plugin marketplace upgrade codex-pair-bridge
 codex plugin add codex-pair-bridge@codex-pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and all five tools. Version 0.4.0 adds device inventory, model load/unload, and direct device targeting while preserving the router form of `pair_list` and `pair_ask`.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.4.0 introduced device inventory, model load/unload, and direct device targeting; the new smart, comparison, diagnostic and optional Jev tools are available from this development checkout.
 
 ## For contributors
 
@@ -229,7 +238,7 @@ cd plugins/codex-pair-bridge
 uv run --locked --script ./scripts/server.py --self-test
 ```
 
-The 17 automated tests cover MCP initialization, argument validation, configuration, SSH tunnel planning, device inventory, lifecycle operations, errors, timeouts, locking and response parsing. CI runs on **macOS, Windows and Linux**. Real routed and device-targeted requests have also been tested on macOS and a remote Windows node; this does not certify every model/server combination.
+The automated tests cover MCP initialization, argument validation, configuration, SSH tunnel planning, device inventory, lifecycle operations, errors, timeouts, locking and response parsing. CI runs on **macOS, Windows and Linux**. Real routed and device-targeted requests were tested on macOS and a remote Windows node for the earlier release; new workflows still require device-specific acceptance runs.
 
 Dependencies are locked in `scripts/server.py.lock`. Update intentionally with `uv lock --script scripts/server.py`, then rerun tests.
 

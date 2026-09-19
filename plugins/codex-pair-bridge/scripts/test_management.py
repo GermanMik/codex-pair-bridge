@@ -5,7 +5,7 @@ import server
 import management
 
 class ManagementTests(unittest.TestCase):
-    def scope(self):
+    def scope(self, *_args, **_kwargs):
         return contextlib.nullcontext(object())
 
     def test_no_download_for_missing_model(self):
