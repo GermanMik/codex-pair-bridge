@@ -9,7 +9,7 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 
 ## 2. Smart `/pair ask`
 
-- [x] Refresh the live inventory of each configured device and PAIR routing catalog before selecting a model; distinguish installed, loaded, offline and stale entries.
+- [x] Refresh live inventory and PAIR routing catalog; expose current check time/status, installed/loaded state and last request outcome, and recheck type/context under the device lock before inference.
 - [ ] Select an **already installed** chat model using the task, device reachability, model type, context capacity and available memory. Exact keys, type, reachability, context and an optional weight-size cap are implemented; actual free RAM/VRAM capacity is not available from the current LM Studio inventory.
 - [x] Reuse a suitable loaded instance, or load an installed model when needed. Record the exact instance ID and whether this task created it.
 - [x] Send a bounded request, report model/device, timing, completion status and any truncation, and reject an empty answer; Codex still must verify factual claims.

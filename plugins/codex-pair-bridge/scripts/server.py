@@ -17,6 +17,7 @@ import os
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -87,6 +88,21 @@ def catalog() -> list[dict]:
             hint = 'embedding' if 'embed' in name.lower() else ('draft' if any(x in name.lower() for x in ('dflash', 'draft')) else 'chat_candidate')
             result.append({'id': name, 'kind_hint': hint})
     return result
+
+
+def checked_models(device: str, rows: list[dict]) -> list[dict]:
+    """Attach current inventory status and last request outcome without storing prompts."""
+    checked_at = datetime.now(timezone.utc).isoformat()
+    recent = diagnostics.recent(100)
+    enriched = []
+    for item in rows:
+        last = next((r for r in reversed(recent) if r.get('device') == device and
+                     r.get('model') == item['key']), None)
+        enriched.append(dict(item, availability='online',
+                             load_state='loaded' if item['loaded_instances'] else 'installed_unloaded',
+                             checked_at=checked_at, last_request_status=last.get('status') if last else 'not_checked',
+                             last_request_reason=last.get('reason') if last else None))
+    return enriched
 
 
 def completion(data: dict, requested_model: str, device: str | None, started: float) -> dict:
@@ -169,7 +185,8 @@ def pair_list(device: str | None = None) -> dict:
     """
     if device is not None:
         with management.client(device) as c:
-            return {'device': device, 'models': management.models(c), 'source': 'LM Studio native API'}
+            return {'device': device, 'online': True, 'checked_at': datetime.now(timezone.utc).isoformat(),
+                    'models': checked_models(device, management.models(c)), 'source': 'LM Studio native API'}
     return {'endpoint': BASE_URL, 'models': catalog(), 'notice': 'Catalog only; model availability must be confirmed by a successful request.'}
 
 
@@ -233,9 +250,13 @@ def pair_devices() -> dict:
     for name in management.devices():
         try:
             with management.client(name) as c:
-                result.append({'device': name, 'online': True, 'models': management.models(c)})
+                result.append({'device': name, 'online': True,
+                               'checked_at': datetime.now(timezone.utc).isoformat(),
+                               'models': checked_models(name, management.models(c))})
         except ValueError as exc:
-            result.append({'device': name, 'online': False, 'error': str(exc)})
+            result.append({'device': name, 'online': False,
+                           'checked_at': datetime.now(timezone.utc).isoformat(),
+                           'check_status': 'unreachable', 'error': str(exc)})
     return {'devices': result, 'notice': 'Management covers configured LM Studio devices only. PAIR routing catalog remains pair_list().'}
 
 
@@ -317,6 +338,11 @@ def pair_smart_ask(
         with management.client(selected_device) as c:
             # Recheck after selection: another application may have changed the load state.
             live = management.find_model(c, key)
+            if live.get('type') != 'llm':
+                raise ValueError('Selected model is no longer a chat LLM; refresh inventory')
+            limit = live.get('max_context_length')
+            if isinstance(limit, int) and limit < context_length:
+                raise ValueError('Selected model context is now smaller than requested; refresh inventory')
             instances = live['loaded_instances']
             if len(instances) > 1:
                 raise ValueError('Multiple instances of the selected model are loaded; choose and manage one explicitly')

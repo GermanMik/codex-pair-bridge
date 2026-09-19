@@ -81,6 +81,29 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No suitable installed'):
             server.select_model(rows, model='gpt-oss-20b')
 
+    def test_checked_inventory_shows_load_state_and_last_result(self):
+        rows = [{'key': 'warm', 'type': 'llm', 'max_context_length': 8192,
+                 'loaded_instances': [{'id': 'warm-i'}], 'size_bytes': 100}]
+        with patch.object(server.diagnostics, 'recent', return_value=[{'device': 'mac', 'model': 'warm',
+              'status': 'error', 'reason': 'timeout'}]):
+            result = server.checked_models('mac', rows)[0]
+        self.assertEqual(result['availability'], 'online')
+        self.assertEqual(result['load_state'], 'loaded')
+        self.assertEqual(result['last_request_reason'], 'timeout')
+        self.assertEqual(result['max_context_length'], 8192)
+
+    def test_smart_ask_rechecks_type_before_inference(self):
+        initial = {'key': 'warm', 'type': 'llm', 'loaded_instances': [{'id': 'warm-i'}]}
+        changed = dict(initial, type='embedding')
+        snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [initial]}]}
+        with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
+             patch.object(server.management, 'find_model', return_value=changed), \
+             patch.object(server.management, 'request') as req:
+            factory.return_value.__enter__.return_value = object()
+            with self.assertRaisesRegex(ValueError, 'no longer a chat LLM'):
+                server.pair_smart_ask('question')
+            req.assert_not_called()
+
     def test_smart_ask_preserves_existing_instance(self):
         row = {'key': 'warm', 'type': 'llm', 'loaded_instances': [{'id': 'warm-i'}]}
         snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [row]}]}
