@@ -146,11 +146,22 @@ def select_model(inventory: list[dict], model: str | None = None, device: str | 
             candidates.append((row['device'], item))
     if not candidates:
         raise ValueError('No suitable installed chat model on an online configured device; no download was made')
-    # Prefer a reused instance, then smaller weights and a stable device/key ordering.
-    return min(candidates, key=lambda x: (0 if task_hint != 'code' or any(
-                                              term in x[1]['key'].lower() for term in ('code', 'coder', 'devstral')) else 1,
-                                          not bool(x[1]['loaded_instances']),
-                                          x[1].get('size_bytes', 1 << 62), x[0], x[1]['key']))
+    def rank(row):
+        target, item = row
+        loaded = bool(item['loaded_instances'])
+        size = item.get('size_bytes') if isinstance(item.get('size_bytes'), int) else 1 << 62
+        capacity = item.get('max_context_length') if isinstance(item.get('max_context_length'), int) else 0
+        code_hint = any(term in item['key'].lower() for term in ('code', 'coder', 'devstral'))
+        if task_hint == 'code':
+            return (not code_hint, not loaded, -capacity, size, target, item['key'])
+        if task_hint == 'fast':
+            return (not loaded, size, target, item['key'])
+        if task_hint == 'long_context':
+            return (-capacity, not loaded, size, target, item['key'])
+        if task_hint == 'analysis':
+            return (not loaded, -capacity, -size, target, item['key'])
+        return (not loaded, size, target, item['key'])
+    return min(candidates, key=rank)
 
 
 @contextlib.contextmanager
@@ -309,7 +320,7 @@ def pair_smart_ask(
     context_length: Annotated[int, Field(ge=512, le=262144)] = 8192,
     max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048,
     unload_after: bool = True,
-    task_hint: Annotated[str, Field(pattern='^(general|code|fast)$')] = 'general',
+    task_hint: Annotated[str, Field(pattern='^(general|code|fast|long_context|analysis)$')] = 'general',
     max_load_bytes: Annotated[int | None, Field(ge=1)] = None,
 ) -> dict:
     """Select an installed LLM from live device inventories, load if needed, ask once, and clean up only a newly created instance.
@@ -392,6 +403,9 @@ def pair_smart_ask(
                     cleanup = 'existing_instance_preserved'
                 return dict(result, selected_model=key, instance_id=instances[0]['id'],
                             loaded_for_request=bool(owned_id), cleanup=cleanup,
+                            selection_profile=task_hint,
+                            selection_reason=('explicit model/device' if model or device else
+                                              'installed chat model ranked by profile, load state, context and size'),
                             router_status=router_status, router_advertises_model=key in router_models)
 
 

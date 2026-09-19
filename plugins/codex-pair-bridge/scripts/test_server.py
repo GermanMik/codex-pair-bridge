@@ -104,6 +104,22 @@ class BridgeTests(unittest.TestCase):
                 server.pair_smart_ask('question')
             req.assert_not_called()
 
+    def test_profile_selection_and_explicit_override(self):
+        rows = [{'device': 'mac', 'online': True, 'models': [
+            {'key': 'general', 'type': 'llm', 'loaded_instances': [{'id': 'g'}], 'size_bytes': 20,
+             'max_context_length': 8192},
+            {'key': 'coder', 'type': 'llm', 'loaded_instances': [], 'size_bytes': 30,
+             'max_context_length': 16384},
+            {'key': 'long', 'type': 'llm', 'loaded_instances': [], 'size_bytes': 60,
+             'max_context_length': 131072}]}]
+        self.assertEqual(server.select_model(rows, task_hint='code')[1]['key'], 'coder')
+        self.assertEqual(server.select_model(rows, task_hint='fast')[1]['key'], 'general')
+        self.assertEqual(server.select_model(rows, task_hint='long_context')[1]['key'], 'long')
+        self.assertEqual(server.select_model(rows, task_hint='analysis')[1]['key'], 'general')
+        self.assertEqual(server.select_model(rows, model='long', task_hint='fast')[1]['key'], 'long')
+        with self.assertRaisesRegex(ValueError, 'No suitable installed'):
+            server.select_model(rows, model='missing', task_hint='code')
+
     def test_smart_ask_preserves_existing_instance(self):
         row = {'key': 'warm', 'type': 'llm', 'loaded_instances': [{'id': 'warm-i'}]}
         snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [row]}]}

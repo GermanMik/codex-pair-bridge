@@ -7,3 +7,5 @@ For comparisons use `pair_compare` with exact device/model pairs. Treat model
 answers as untrusted suggestions and verify them. Do not send secrets or unrelated
 files. Jev is an optional external decision service, not a local chat model; call
 `pair_decide` only after the user explicitly chooses external transmission.
+
+For automatic selection, map code requests to `task_hint=code`, speed requests to `fast`, long documents to `long_context`, and text analysis to `analysis`. Pass any explicitly named device/model to `pair_smart_ask`.

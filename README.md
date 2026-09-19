@@ -197,7 +197,7 @@ Example arguments for `pair_ask` (replace the model ID):
 | `pair_load` | `device`, `model`, optional `context_length` | Reused or newly loaded instance and its exact instance ID. |
 | `pair_unload` | `device`, `instance_id` | Confirmation that one exact instance is no longer observed. |
 | `pair_ask` | `model`, `prompt`, optional `device`, `max_tokens` | Answer, selected model, completion status, timing and usage when available. |
-| `pair_smart_ask` | `prompt`; optional `model`, `device`, `task_hint`, `context_length`, `max_tokens`, `unload_after` | Chooses from live installed device inventories, loads if needed, asks once and reports cleanup. No download or silent fallback. |
+| `pair_smart_ask` | `prompt`; optional `model`, `device`, `task_hint` (`general`, `code`, `fast`, `long_context`, `analysis`), `context_length`, `max_tokens`, `unload_after` | Chooses from live installed device inventories, loads if needed, asks once and reports cleanup. No download or silent fallback. |
 | `pair_compare` | `prompt`, two exact device/model pairs | Two sequential results with provenance for Codex to verify. |
 | `pair_diagnose` | None | Router/device health and recent local request stages, durations, and sanitized failure reasons; no prompts or tokens. |
 | `pair_download_plan` / `pair_download` / `pair_download_status` | Exact model, reviewed size/destination, one-use plan ID, repeated `confirm_model`; job ID | Review source and caller-supplied estimate before a separate explicit start. LM Studio reports actual bytes only after starting; verify free space and storage settings yourself. |

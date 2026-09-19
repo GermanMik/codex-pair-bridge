@@ -40,3 +40,12 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 - [TypeSafe AI / Jev](https://typesafe.ai/)
 - [LM Studio native API](https://lmstudio.ai/docs/developer/rest)
 - [zvec-grep](https://github.com/zvec-ai/zvec-grep)
+
+## Delivered sequence 5 → 1 → 2 → 3 → 4 → 6
+
+- [x] 5. Redacted per-request diagnostics (`docs/proof/05-diagnostics.md`).
+- [x] 1. Live inventory and in-lock recheck (`docs/proof/01-inventory.md`).
+- [x] 2. Profile-based installed-model selection (`docs/proof/02-profiles.md`).
+- [ ] 3. Source-verified two-model comparison.
+- [ ] 4. Resource management across configured devices.
+- [ ] 6. Project rename to pair-bridge.
