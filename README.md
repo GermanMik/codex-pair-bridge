@@ -199,7 +199,7 @@ Example arguments for `pair_ask` (replace the model ID):
 | `pair_ask` | `model`, `prompt`, optional `device`, `max_tokens` | Answer, selected model, completion status, timing and usage when available. |
 | `pair_smart_ask` | `prompt`; optional `model`, `device`, `task_hint`, `context_length`, `max_tokens`, `unload_after` | Chooses from live installed device inventories, loads if needed, asks once and reports cleanup. No download or silent fallback. |
 | `pair_compare` | `prompt`, two exact device/model pairs | Two sequential results with provenance for Codex to verify. |
-| `pair_diagnose` | None | Redacted router and device health summary. |
+| `pair_diagnose` | None | Router/device health and recent local request stages, durations, and sanitized failure reasons; no prompts or tokens. |
 | `pair_download_plan` / `pair_download` / `pair_download_status` | Exact model, reviewed size/destination, one-use plan ID, repeated `confirm_model`; job ID | Review source and caller-supplied estimate before a separate explicit start. LM Studio reports actual bytes only after starting; verify free space and storage settings yourself. |
 | `pair_decide` / `pair_score` | State, Choice options or ordered Score levels, `allow_external=true` | Optional typed evaluation from **external** TypeSafe AI Jev; requires `TYPESAFE_API_KEY`. |
 

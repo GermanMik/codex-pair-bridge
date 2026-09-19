@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import management
 import jev
+import diagnostics
 from filelock import FileLock, Timeout
 from platformdirs import user_cache_path
 from urllib.parse import urlsplit
@@ -173,6 +174,7 @@ def pair_list(device: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+@diagnostics.traced
 def pair_ask(
     model: Annotated[str, Field(min_length=1, max_length=256)],
     prompt: Annotated[str, Field(min_length=1, max_length=48000)],
@@ -190,8 +192,10 @@ def pair_ask(
     """
     if not prompt.strip():
         raise ValueError('prompt must not be blank')
+    diagnostics.stage('queue', device=device, model=model)
     with inference_lock(device):
         start = time.monotonic()
+        diagnostics.stage('inventory')
         payload = {'model': model, 'messages': [{'role': 'user', 'content': prompt}],
                    'max_tokens': max_tokens, 'stream': False}
         if device is not None:
@@ -203,6 +207,7 @@ def pair_ask(
                 if len(instances) != 1:
                     raise ValueError('Device chat requires exactly one loaded instance. Use pair_load or resolve multiple instances first')
                 payload['model'] = instances[0]['id']
+                diagnostics.stage('inference')
                 data = management.request(c, 'POST', '/v1/chat/completions', payload)
         else:
             available = {item['id']: item for item in catalog()}
@@ -210,7 +215,9 @@ def pair_ask(
                 raise ValueError('Model is no longer advertised by PAIR. Refresh pair_list and use an exact ID.')
             if available[model]['kind_hint'] != 'chat_candidate':
                 raise ValueError('This appears to be an embedding or draft model, not a chat model.')
+            diagnostics.stage('inference')
             data = request('POST', '/chat/completions', payload)
+        diagnostics.stage('validation')
         return completion(data, model, device, start)
 
 
@@ -273,6 +280,7 @@ def pair_unload(device: str, instance_id: str) -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+@diagnostics.traced
 def pair_smart_ask(
     prompt: Annotated[str, Field(min_length=1, max_length=48000)],
     model: str | None = None,
@@ -290,6 +298,7 @@ def pair_smart_ask(
     """
     if not prompt.strip():
         raise ValueError('prompt must not be blank')
+    diagnostics.stage('inventory', device=device, model=model)
     try:
         router_models = {row['id'] for row in catalog()}
         router_status = 'online'
@@ -299,6 +308,7 @@ def pair_smart_ask(
     snapshot = pair_devices()
     selected_device, selected = select_model(snapshot['devices'], model, device, context_length,
                                              task_hint, max_load_bytes)
+    diagnostics.stage('queue', device=selected_device, model=selected['key'])
     with inference_lock(selected_device, wait_seconds=30):
         key = selected['key']
         started = time.monotonic()
@@ -316,6 +326,7 @@ def pair_smart_ask(
                 if isinstance(actual_context, int) and actual_context < context_length:
                     raise ValueError('Loaded instance context is smaller than requested; choose a smaller context or another model')
             if not instances:
+                diagnostics.stage('load')
                 load_result = management.request(c, 'POST', '/api/v1/models/load', {'model': key, 'context_length': context_length})
                 loaded_id = load_result.get('instance_id')
                 if not isinstance(loaded_id, str) or not loaded_id:
@@ -328,13 +339,16 @@ def pair_smart_ask(
             payload = {'model': instances[0]['id'], 'messages': [{'role': 'user', 'content': prompt}],
                        'max_tokens': max_tokens, 'stream': False}
             try:
+                diagnostics.stage('inference')
                 data = management.request(c, 'POST', '/v1/chat/completions', payload)
+                diagnostics.stage('validation')
                 result = completion(data, key, selected_device, started)
             except Exception:
                 # A timeout may leave inference running. Retain the instance for inspection.
                 raise
             else:
                 if owned_id and unload_after:
+                    diagnostics.stage('cleanup')
                     # This lock excludes other bridge calls, but cannot observe external clients.
                     current = management.find_model(c, key)['loaded_instances']
                     if len(current) == 1 and current[0]['id'] == owned_id:
@@ -389,7 +403,15 @@ def pair_diagnose() -> dict:
         router = {'online': True, 'advertised_models': advertised}
     except ValueError:
         router = {'online': False, 'error': 'PAIR router unavailable or catalog invalid'}
-    return {'devices': rows, 'router': router}
+    recent = diagnostics.recent()
+    explanations = {'timeout': 'The device did not finish before the request deadline; inspect its load state before retrying.',
+                    'device_unreachable': 'The device engine could not be reached; check its server and SSH/Tailscale path.',
+                    'model_not_installed': 'The requested model is not installed on an online configured device.',
+                    'empty_answer': 'The model returned no final text; a larger output budget may be needed.',
+                    'load_failed': 'Loading did not complete or could not be confirmed; inspect memory and engine state.',
+                    'request_failed': 'The request failed; check local engine logs without sharing prompts or tokens.'}
+    return {'devices': rows, 'router': router, 'recent_requests': [dict(row, explanation=explanations.get(row.get('reason')))
+                                                                  for row in recent]}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))

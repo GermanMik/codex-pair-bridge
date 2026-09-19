@@ -5,6 +5,7 @@ from unittest.mock import patch
 import httpx
 import server
 import jev
+import diagnostics
 
 
 class BridgeTests(unittest.TestCase):
@@ -56,6 +57,19 @@ class BridgeTests(unittest.TestCase):
         with patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), patch.object(server, 'request', return_value={'choices': [{'message': {'content': None, 'reasoning_content': 'private reasoning'}, 'finish_reason': 'length'}]}):
             with self.assertRaisesRegex(ValueError, 'no final text'):
                 server.pair_ask('model', 'test')
+
+    def test_diagnostic_journal_redacts_prompt_and_survives_partial_line(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostics, 'journal_path', return_value=Path(tmp) / 'requests.jsonl'), \
+             patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]), \
+             patch.object(server, 'request', side_effect=ValueError('PAIR request timed out; PRIVATE PROMPT')):
+            with self.assertRaisesRegex(ValueError, 'PRIVATE PROMPT'):
+                server.pair_ask('model', 'PRIVATE PROMPT')
+            raw = (Path(tmp) / 'requests.jsonl').read_text()
+            self.assertNotIn('PRIVATE PROMPT', raw)
+            self.assertIn('"reason":"timeout"', raw)
+            with (Path(tmp) / 'requests.jsonl').open('a') as out:
+                out.write('{partial\n')
+            self.assertEqual(diagnostics.recent(5)[0]['reason'], 'timeout')
 
     def test_selector_prefers_loaded_installed_chat(self):
         rows = [{'device': 'pc', 'online': False, 'models': [{'key': 'offline', 'type': 'llm', 'loaded_instances': []}]},

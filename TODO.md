@@ -19,7 +19,7 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 ## 3. Compare and diagnose
 
 - [x] Compare answers from two explicitly selected installed models sequentially. Each result retains provenance and usage/timing; Codex must verify disputed claims against sources.
-- [ ] Add diagnostic output for endpoint reachability, inventory, load state, memory/engine errors, timeouts and empty/truncated answers. Read-only reachability/inventory/load counts and sanitized errors are implemented; detailed engine-memory diagnostics and historical timeout/empty-answer metrics remain.
+- [x] Add local per-request diagnostics for endpoint reachability, inventory/load stages, queue/load/inference timings, sanitized timeout and empty-answer reasons. Detailed engine-memory telemetry is limited by the available LM Studio API.
 - [x] Add reproducible unit tests for model selection, missing model, simultaneous use, timeout and cleanup; 27 self-tests pass.
 
 ## 4. Resource management and optional downloads
