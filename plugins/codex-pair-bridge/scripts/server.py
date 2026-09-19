@@ -106,6 +106,12 @@ def checked_models(device: str, rows: list[dict]) -> list[dict]:
     return enriched
 
 
+def resource_summary(rows: list[dict], cap: int | None) -> dict:
+    return {'max_loaded_weight_bytes': cap,
+            'loaded_model_weight_bytes': sum(m.get('size_bytes', 0) for m in rows if m['loaded_instances']),
+            'note': 'Weight-size estimate excludes KV cache and runtime overhead; LM Studio free RAM/VRAM is not exposed here.'}
+
+
 def completion(data: dict, requested_model: str, device: str | None, started: float) -> dict:
     choices = data.get('choices')
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
@@ -197,8 +203,11 @@ def pair_list(device: str | None = None) -> dict:
     """
     if device is not None:
         with management.client(device) as c:
+            rows = management.models(c)
             return {'device': device, 'online': True, 'checked_at': datetime.now(timezone.utc).isoformat(),
-                    'models': checked_models(device, management.models(c)), 'source': 'LM Studio native API'}
+                    'models': checked_models(device, rows),
+                    'resources': resource_summary(rows, management.devices()[device].get('max_loaded_bytes')),
+                    'source': 'LM Studio native API'}
     return {'endpoint': BASE_URL, 'models': catalog(), 'notice': 'Catalog only; model availability must be confirmed by a successful request.'}
 
 
@@ -222,7 +231,7 @@ def pair_ask(
     if not prompt.strip():
         raise ValueError('prompt must not be blank')
     diagnostics.stage('queue', device=device, model=model)
-    with inference_lock(device):
+    with inference_lock(device, wait_seconds=30):
         start = time.monotonic()
         diagnostics.stage('inventory')
         payload = {'model': model, 'messages': [{'role': 'user', 'content': prompt}],
@@ -259,12 +268,14 @@ def pair_devices() -> dict:
     inventory, not automatic PAIR cluster discovery. No model is loaded by this call.
     """
     result = []
-    for name in management.devices():
+    for name, config in management.devices().items():
         try:
             with management.client(name) as c:
+                models = management.models(c)
                 result.append({'device': name, 'online': True,
                                'checked_at': datetime.now(timezone.utc).isoformat(),
-                               'models': checked_models(name, management.models(c))})
+                               'models': checked_models(name, models),
+                               'resources': resource_summary(models, config.get('max_loaded_bytes'))})
         except ValueError as exc:
             result.append({'device': name, 'online': False,
                            'checked_at': datetime.now(timezone.utc).isoformat(),
@@ -273,6 +284,7 @@ def pair_devices() -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+@diagnostics.traced
 def pair_load(device: str, model: str,
               context_length: Annotated[int, Field(ge=512, le=262144)] = 8192) -> dict:
     """Load an installed model on one device into RAM/VRAM; never download weights.
@@ -280,33 +292,52 @@ def pair_load(device: str, model: str,
     Reuses existing loaded instances without changing their configuration. May
     consume substantial memory or trigger engine auto-eviction. Verify the result.
     """
-    with inference_lock(device), management.client(device) as c:
-        selected = management.find_model(c, model)
+    diagnostics.stage('queue', device=device, model=model)
+    with inference_lock(device, wait_seconds=30), management.client(device) as c:
+        diagnostics.stage('inventory')
+        before_rows = management.models(c)
+        matches = [m for m in before_rows if m['key'] == model]
+        if len(matches) != 1:
+            raise ValueError('Model is not installed on this device. Refresh pair_list(device=...)')
+        selected = matches[0]
         if selected['loaded_instances']:
             return {'device': device, 'status': 'already_loaded', 'model': selected}
+        management.ensure_capacity(before_rows, selected, management.devices()[device].get('max_loaded_bytes'))
         maximum = selected.get('max_context_length')
         if selected.get('type') == 'llm' and isinstance(maximum, int) and context_length > maximum:
             raise ValueError('Requested context exceeds this model maximum')
         body = {'model': model}
         if selected.get('type') == 'llm':
             body['context_length'] = context_length
-        management.request(c, 'POST', '/api/v1/models/load', body)
+        diagnostics.stage('load')
+        load_result = management.request(c, 'POST', '/api/v1/models/load', body)
+        diagnostics.stage('verification')
         after = management.find_model(c, model)
-        return {'device': device, 'status': 'loaded' if after['loaded_instances'] else 'not_confirmed', 'model': after}
+        after_rows = management.models(c)
+        before_ids = {i['id'] for m in before_rows for i in m['loaded_instances']}
+        after_ids = {i['id'] for m in after_rows for i in m['loaded_instances']}
+        return {'device': device, 'status': 'loaded' if after['loaded_instances'] else 'not_confirmed',
+                'model': after, 'load_time_seconds': load_result.get('load_time_seconds'),
+                'engine_evicted_instances': sorted(before_ids - after_ids)}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+@diagnostics.traced
 def pair_unload(device: str, instance_id: str) -> dict:
     """Unload one exact loaded instance from a device; model files stay installed.
 
     This may disrupt users outside this bridge. Do not unload unrelated models
     merely because they are loaded; use the user's requested scope. No unload-all.
     """
-    with inference_lock(device), management.client(device) as c:
+    diagnostics.stage('queue', device=device)
+    with inference_lock(device, wait_seconds=30), management.client(device) as c:
+        diagnostics.stage('inventory')
         before = management.models(c)
         if not any(i['id'] == instance_id for m in before for i in m['loaded_instances']):
             raise ValueError('Instance is not loaded. Refresh pair_list(device=...)')
+        diagnostics.stage('unload')
         management.request(c, 'POST', '/api/v1/models/unload', {'instance_id': instance_id})
+        diagnostics.stage('verification')
         remaining = management.models(c)
         still_loaded = any(i['id'] == instance_id for m in remaining for i in m['loaded_instances'])
         return {'device': device, 'instance_id': instance_id, 'status': 'not_confirmed' if still_loaded else 'unloaded'}
@@ -347,6 +378,8 @@ def pair_smart_ask(
         started = time.monotonic()
         owned_id = None
         cleanup = 'not_needed'
+        load_time_seconds = None
+        engine_evicted_instances = []
         with management.client(selected_device) as c:
             # Recheck after selection: another application may have changed the load state.
             live = management.find_model(c, key)
@@ -365,7 +398,15 @@ def pair_smart_ask(
                     raise ValueError('Loaded instance context is smaller than requested; choose a smaller context or another model')
             if not instances:
                 diagnostics.stage('load')
+                before_rows = management.models(c)
+                candidate = next((m for m in before_rows if m['key'] == key), None)
+                if candidate is None:
+                    raise ValueError('Selected model disappeared before load; refresh inventory')
+                management.ensure_capacity(before_rows, candidate,
+                                           management.devices()[selected_device].get('max_loaded_bytes'))
+                before_ids = {i['id'] for m in before_rows for i in m['loaded_instances']}
                 load_result = management.request(c, 'POST', '/api/v1/models/load', {'model': key, 'context_length': context_length})
+                load_time_seconds = load_result.get('load_time_seconds')
                 loaded_id = load_result.get('instance_id')
                 if not isinstance(loaded_id, str) or not loaded_id:
                     raise ValueError('Load response had no instance ID; inspect state before retrying')
@@ -374,6 +415,8 @@ def pair_smart_ask(
                     raise ValueError('Load state is not confirmed; inspect pair_list before retrying')
                 owned_id = loaded_id
                 instances = after['loaded_instances']
+                after_ids = {i['id'] for m in management.models(c) for i in m['loaded_instances']}
+                engine_evicted_instances = sorted(before_ids - after_ids)
             payload = {'model': instances[0]['id'], 'messages': [{'role': 'user', 'content': prompt}],
                        'max_tokens': max_tokens, 'stream': False}
             try:
@@ -407,6 +450,8 @@ def pair_smart_ask(
                             selection_profile=task_hint,
                             selection_reason=('explicit model/device' if model or device else
                                               'installed chat model ranked by profile, load state, context and size'),
+                            load_time_seconds=load_time_seconds,
+                            engine_evicted_instances=engine_evicted_instances,
                             router_status=router_status, router_advertises_model=key in router_models)
 
 

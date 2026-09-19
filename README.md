@@ -146,6 +146,8 @@ Add native LM Studio API origins to the same configuration file. These are separ
 
 Use the real native API origin from each LM Studio installation; the ports above are examples. `ssh_host` must be an existing OpenSSH config alias. The bridge opens a temporary loopback-only tunnel with host-key checking, runs no remote shell command, and closes the tunnel after the request. A direct HTTPS origin is also supported.
 
+Each device may set `max_loaded_bytes` to a positive weight-size budget. Bridge rejects a cold load if currently loaded model weights plus the candidate exceed it; this conservative estimate excludes KV cache and runtime overhead. Calls wait up to 30 seconds in a per-device queue, and `/pair diagnose` shows queued/loading/inference stages while active. Load results include LM Studio load time and any instances that disappeared during loading. Bridge only auto-unloads the exact instance it loaded for the request. [LM Studio Idle TTL and Auto-Evict](https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict) apply to JIT loads according to server settings; Bridge does not change those settings.
+
 Devices are configured explicitly. PAIR peer discovery does not grant model-management access. Ollama lifecycle management, model deletion, engine installation, and PAIR cluster administration are not implemented. The separate `pair_download` tool requires a one-use `pair_download_plan` and the exact model ID repeated in `confirm_model`; it is never used by `pair_ask` or `pair_smart_ask`.
 
 For an authenticated device, set `api_key_env` to the name of an environment variable containing its token and pass that variable to the MCP process through `.mcp.json` `env_vars`. Keep tokens out of configuration committed to Git and out of prompts.

@@ -86,6 +86,12 @@ def stage(name: str, *, device: str | None = None, model: str | None = None) -> 
         trace['device'] = device[:128]
     if model is not None:
         trace['model'] = model[:256]
+    try:
+        _append({'request_id': trace['request_id'], 'started_at': trace['started_at'],
+                 'operation': trace['operation'], 'device': trace['device'], 'model': trace['model'],
+                 'stage': name, 'durations_ms': dict(trace['durations_ms']), 'status': 'running'})
+    except OSError:
+        pass
 
 
 def recent(limit: int = 20) -> list[dict]:
@@ -93,11 +99,18 @@ def recent(limit: int = 20) -> list[dict]:
     if not path.exists():
         return []
     rows = []
-    for line in path.read_text(errors='replace').splitlines()[-max(limit * 3, limit):]:
+    for line in path.read_text(errors='replace').splitlines()[-max(limit * 10, limit):]:
         try:
             row = json.loads(line)
         except ValueError:
             continue  # A partial last write must not hide earlier diagnostics.
-        if isinstance(row, dict) and row.get('operation') in ('pair_ask', 'pair_smart_ask'):
+        if isinstance(row, dict) and row.get('operation') in ('pair_ask', 'pair_smart_ask', 'pair_load', 'pair_unload'):
             rows.append(row)
-    return rows[-limit:]
+    latest = {}
+    for row in rows:
+        latest[row.get('request_id')] = row
+    result = list(latest.values())[-limit:]
+    for row in result:
+        if row.get('status') == 'running' and time.time() - row.get('started_at', 0) > 600:
+            row['status'] = 'interrupted_or_stale'
+    return result

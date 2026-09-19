@@ -1,0 +1,7 @@
+# ProofLoop 04: resource management
+
+Acceptance: per-device calls queue for at most 30 seconds; configured `max_loaded_bytes` blocks cold loads that exceed the sum of loaded weights plus candidate weight. The bridge never unloads unrelated instances to make room. Queue/load/inference stages are visible in the local journal while running; load results report LM Studio load time and instance IDs observed to disappear during load. Automatic cleanup targets only the instance ID returned by this request's load call.
+
+Evidence: `test_device_locks_are_independent`, `test_weight_limit_preserves_other_loaded_models`, `test_running_stage_visible_before_request_completes`, `test_load_reports_engine_eviction_without_unloading_itself`, `test_smart_ask_loads_and_unloads_only_owned_instance` and `test_timeout_retains_new_instance_for_inspection`; 39 self-tests passed. Live cold-load was not performed because the only online chat model was already loaded and the second device was offline.
+
+Limits: native synchronous LM Studio load returns `load_time_seconds` after completion, not a percentage stream. Inventory gives weight size, not free RAM/VRAM or KV-cache overhead. LM Studio's Idle TTL and Auto-Evict are JIT server settings; Bridge neither changes them nor assumes they protect explicit loads. See https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict and https://lmstudio.ai/docs/developer/rest/load.

@@ -38,6 +38,9 @@ def devices():
         key = row.get('api_key_env')
         if key is not None and (not isinstance(key, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)):
             raise ValueError('api_key_env must name an environment variable')
+        cap = row.get('max_loaded_bytes')
+        if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap <= 0):
+            raise ValueError('max_loaded_bytes must be a positive integer')
         result[name] = dict(row, base_url=url.rstrip('/'))
     return result
 
@@ -139,3 +142,13 @@ def find_model(c, key):
     if len(rows) != 1:
         raise ValueError('Model is not installed on this device. Refresh pair_list(device=...); no download was made')
     return rows[0]
+
+
+def ensure_capacity(rows, candidate, max_loaded_bytes):
+    """Conservative weight-size policy; KV cache and runtime overhead are extra."""
+    if max_loaded_bytes is None or candidate['loaded_instances']:
+        return
+    used = sum(m.get('size_bytes', 0) for m in rows if m['loaded_instances'])
+    incoming = candidate.get('size_bytes')
+    if not isinstance(incoming, int) or used + incoming > max_loaded_bytes:
+        raise ValueError('Device model-weight limit would be exceeded; no model was unloaded or loaded')

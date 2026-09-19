@@ -24,7 +24,7 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 
 ## 4. Resource management and optional downloads
 
-- [ ] Add per-device request queues and resource limits, with visibility into load progress and engine auto-eviction behavior. Per-device locking/30-second wait and optional model-size cap are implemented; progress and eviction visibility remain.
+- [x] Add per-device 30-second queues, configurable model-weight budgets, live queue/load/inference stage records, load time and observed engine evictions. Exact free RAM/VRAM and streamed load percentage are not exposed by the synchronous LM Studio load endpoint.
 - [ ] Add model download as a **separate explicit action** only after the core flow is reliable. `pair_download_plan` displays source and caller-supplied estimate/destination before a separate one-use `pair_download` call; ask never downloads. Actual size, destination and free space are not available before starting from the LM Studio API and still require manual verification.
 
 ## Delivery workflow
@@ -47,5 +47,5 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 - [x] 1. Live inventory and in-lock recheck (`docs/proof/01-inventory.md`).
 - [x] 2. Profile-based installed-model selection (`docs/proof/02-profiles.md`).
 - [x] 3. Two-model comparison with provenance and explicit source-verification workflow; actual findings require Codex file review.
-- [ ] 4. Resource management across configured devices.
+- [x] 4. Per-device queues, conservative weight budgets, live stages and observed eviction reporting; see `docs/proof/04-resources.md`.
 - [ ] 6. Project rename to pair-bridge.

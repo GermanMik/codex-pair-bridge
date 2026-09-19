@@ -71,6 +71,18 @@ class BridgeTests(unittest.TestCase):
                 out.write('{partial\n')
             self.assertEqual(diagnostics.recent(5)[0]['reason'], 'timeout')
 
+    def test_running_stage_visible_before_request_completes(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostics, 'journal_path', return_value=Path(tmp) / 'requests.jsonl'), \
+             patch.object(server, 'catalog', return_value=[{'id': 'model', 'kind_hint': 'chat_candidate'}]):
+            def respond(*_args):
+                rows = diagnostics.recent()
+                self.assertEqual(rows[-1]['stage'], 'inference')
+                self.assertEqual(rows[-1]['status'], 'running')
+                return {'model': 'model', 'choices': [{'message': {'content': 'answer'}, 'finish_reason': 'stop'}]}
+            with patch.object(server, 'request', side_effect=respond):
+                server.pair_ask('model', 'question')
+            self.assertEqual(diagnostics.recent()[-1]['status'], 'ok')
+
     def test_selector_prefers_loaded_installed_chat(self):
         rows = [{'device': 'pc', 'online': False, 'models': [{'key': 'offline', 'type': 'llm', 'loaded_instances': []}]},
                 {'device': 'mac', 'online': True, 'models': [
@@ -143,7 +155,10 @@ class BridgeTests(unittest.TestCase):
                 return {'model': 'cold', 'choices': [{'message': {'content': 'answer'}, 'finish_reason': 'stop'}]}
             return {}
         with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
-             patch.object(server.management, 'find_model', side_effect=responses), patch.object(server.management, 'request', side_effect=send) as req:
+             patch.object(server.management, 'find_model', side_effect=responses), \
+             patch.object(server.management, 'models', side_effect=[[cold], [warm]]), \
+             patch.object(server.management, 'devices', return_value={'mac': {}}), \
+             patch.object(server.management, 'request', side_effect=send) as req:
             factory.return_value.__enter__.return_value = object()
             result = server.pair_smart_ask('question')
         self.assertEqual(result['cleanup'], 'unloaded')
@@ -162,6 +177,8 @@ class BridgeTests(unittest.TestCase):
             return {}
         with patch.object(server, 'pair_devices', return_value=snapshot), patch.object(server.management, 'client') as factory, \
              patch.object(server.management, 'find_model', side_effect=[cold, warm]), \
+             patch.object(server.management, 'models', side_effect=[[cold], [warm]]), \
+             patch.object(server.management, 'devices', return_value={'mac': {}}), \
              patch.object(server.management, 'request', side_effect=send) as req:
             factory.return_value.__enter__.return_value = object()
             with self.assertRaisesRegex(ValueError, 'timed out'):
