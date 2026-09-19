@@ -12,7 +12,9 @@ import httpx
 
 
 def devices():
-    path = Path.home() / '.codex-pair-bridge.json'
+    path = Path.home() / '.pair-bridge.json'
+    if not path.exists():
+        path = Path.home() / '.codex-pair-bridge.json'
     config = json.loads(path.read_text()) if path.exists() else {}
     rows = config.get('devices', [])
     if not isinstance(rows, list):

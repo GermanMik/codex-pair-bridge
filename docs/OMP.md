@@ -15,7 +15,7 @@ with the absolute path of your checkout. Merge it with any existing servers:
     "pair-bridge": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "--locked", "--script", "/ABSOLUTE/PATH/codex-pair-bridge/plugins/codex-pair-bridge/scripts/server.py"],
+      "args": ["run", "--locked", "--script", "/ABSOLUTE/PATH/pair-bridge/plugins/pair-bridge/scripts/server.py"],
       "timeout": 210000
     }
   }
@@ -25,7 +25,7 @@ with the absolute path of your checkout. Merge it with any existing servers:
 Start OMP and run `/mcp test pair-bridge`. The tool list should include
 `pair_devices`, `pair_list`, `pair_smart_ask`, `pair_compare`, and
 `pair_diagnose`. Then try `/pair show installed models`. The same bridge
-configuration file (`~/.codex-pair-bridge.json`) is shared with Codex.
+configuration file (`~/.pair-bridge.json`) is shared with Codex.
 
 OMP may import some Codex MCP settings, but a plugin's `.mcp.json` is not a
 portable OMP installation mechanism. Explicit OMP configuration above is the

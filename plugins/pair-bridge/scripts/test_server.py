@@ -277,6 +277,12 @@ class JevTests(unittest.TestCase):
                 jev.score('state', 'rate', ['low', 'high'], allow_external=True)
 
 class ConfigTests(unittest.TestCase):
+    def test_new_config_takes_precedence_over_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server.Path, 'home', return_value=Path(tmp)), patch.dict(server.os.environ, {}, clear=True):
+            (Path(tmp)/'.codex-pair-bridge.json').write_text('{"base_url":"http://localhost:7000/v1"}')
+            (Path(tmp)/'.pair-bridge.json').write_text('{"base_url":"http://localhost:8000/v1"}')
+            self.assertEqual(server.load_config(), ('http://localhost:8000/v1', None))
+
     def test_config_file(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(server.Path, 'home', return_value=Path(tmp)), patch.dict(server.os.environ, {}, clear=True):
             (Path(tmp)/'.codex-pair-bridge.json').write_text('{"base_url":"http://localhost:7777/v1/"}')

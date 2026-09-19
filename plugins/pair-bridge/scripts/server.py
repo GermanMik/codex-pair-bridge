@@ -28,7 +28,9 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 def load_config() -> tuple[str, str | None]:
-    path = Path.home() / '.codex-pair-bridge.json'
+    path = Path.home() / '.pair-bridge.json'
+    if not path.exists():
+        path = Path.home() / '.codex-pair-bridge.json'
     config = json.loads(path.read_text()) if path.exists() else {}
     if not isinstance(config, dict):
         raise ValueError('PAIR configuration must be a JSON object.')
@@ -45,7 +47,7 @@ BASE_URL, API_KEY = load_config()
 TIMEOUT = 180.0
 _DOWNLOAD_PLANS: dict[str, dict] = {}
 mcp = FastMCP(
-    'codex-pair-bridge',
+    'pair-bridge',
     instructions=(
         'Use PAIR to consult local models when the user requests it or it helps the task. '
         'List models first; use exact advertised IDs. Make calls sequentially. '

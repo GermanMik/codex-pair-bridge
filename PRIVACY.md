@@ -1,6 +1,6 @@
 # Privacy
 
-Codex PAIR Bridge runs locally. It sends model-list requests and the text supplied
+PAIR Bridge runs locally. It sends model-list requests and the text supplied
 to its ask tool to the PAIR endpoint configured by the user. PAIR may route that
 text to connected model servers. Model answers return to Codex and are subject to
 the user's Codex/OpenAI data settings.

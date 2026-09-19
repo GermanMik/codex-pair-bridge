@@ -1,4 +1,4 @@
-Use the Codex PAIR Bridge MCP server to handle this request: $ARGUMENTS
+Use the PAIR Bridge MCP server to handle this request: $ARGUMENTS
 
 First inspect `pair_devices` and `pair_list`. For a question without an exact model,
 use `pair_smart_ask` to choose an installed chat model. Never invent model IDs or

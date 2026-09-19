@@ -1,6 +1,6 @@
 <div align="center">
 
-# Codex PAIR Bridge
+# PAIR Bridge
 
 ### Одна команда `/pair` для моделей на всех устройствах
 
@@ -10,7 +10,7 @@
 
 ![Codex обращается к MCP-инструментам, мост передаёт запрос в PAIR, а PAIR направляет его локальной модели](docs/assets/mcp-explained.png)
 
-[![Тесты](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml)
+[![Тесты](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml)
 [![Лицензия MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
 
 </div>
@@ -73,8 +73,8 @@
 Выполни в терминале:
 
 ```sh
-codex plugin marketplace add GermanMik/codex-pair-bridge
-codex plugin add codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace add GermanMik/pair-bridge
+codex plugin add pair-bridge@pair-bridge
 ```
 
 Команды добавляют наш GitHub-каталог в Codex и устанавливают плагин. Это каталог сообщества, отдельный от общего каталога OpenAI. [Как устроены каталоги плагинов](https://developers.openai.com/plugins/build/plugins).
@@ -108,7 +108,7 @@ codex plugin add codex-pair-bridge@codex-pair-bridge
 
 По умолчанию используется **`http://127.0.0.1:1234/v1`** — адрес прокси PAIR в проверенной конфигурации. Если у тебя другой порт, посмотри адрес в интерфейсе PAIR.
 
-Для изменения адреса создай файл **`.codex-pair-bridge.json` в домашней папке**:
+Для изменения адреса создай файл **`.pair-bridge.json` в домашней папке**:
 
 ```json
 {
@@ -118,8 +118,8 @@ codex plugin add codex-pair-bridge@codex-pair-bridge
 
 | Система | Расположение файла |
 | --- | --- |
-| macOS / Linux | `~/.codex-pair-bridge.json` |
-| Windows | `%USERPROFILE%\.codex-pair-bridge.json` |
+| macOS / Linux | `~/.pair-bridge.json` |
+| Windows | `%USERPROFILE%\.pair-bridge.json` |
 
 Указывай адрес **маршрутизатора PAIR**. Если указать отдельный сервер LM Studio, будут доступны модели только этого сервера. `127.0.0.1` означает компьютер, на котором запущен мост.
 
@@ -226,19 +226,30 @@ codex plugin add codex-pair-bridge@codex-pair-bridge
 
 </details>
 
+## Переход с `codex-pair-bridge`
+
+Новое имя marketplace и плагина — `pair-bridge`. Старый файл `~/.codex-pair-bridge.json` продолжает работать; новый `~/.pair-bridge.json` имеет приоритет. Каталог локального журнала сохраняет старое имя ради истории. Для установленной старой версии:
+
+```sh
+codex plugin remove codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace remove codex-pair-bridge
+codex plugin marketplace add GermanMik/pair-bridge
+codex plugin add pair-bridge@pair-bridge
+```
+
 ## Обновление предыдущей версии
 
 ```sh
-codex plugin marketplace upgrade codex-pair-bridge
-codex plugin add codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace upgrade pair-bridge
+codex plugin add pair-bridge@pair-bridge
 ```
 
-После обновления открой новую задачу, чтобы Codex увидел навык `/pair` и текущие MCP-инструменты. Версия 0.4.0 добавила инвентаризацию устройств и управление загрузкой; новые умные инструменты доступны пока в рабочей копии репозитория.
+После обновления открой новую задачу, чтобы Codex увидел навык `/pair` и текущие MCP-инструменты. Версия 0.5.0 добавила инвентаризацию устройств и управление загрузкой; новые умные инструменты доступны пока в рабочей копии репозитория.
 
 ## Разработчикам
 
 ```sh
-cd plugins/codex-pair-bridge
+cd plugins/pair-bridge
 uv run --locked --script ./scripts/server.py --self-test
 ```
 
@@ -250,12 +261,12 @@ uv run --locked --script ./scripts/server.py --self-test
 <summary><strong>Удаление</strong></summary>
 
 ```sh
-codex plugin remove codex-pair-bridge@codex-pair-bridge
-codex plugin marketplace remove codex-pair-bridge
+codex plugin remove pair-bridge@pair-bridge
+codex plugin marketplace remove pair-bridge
 ```
 
 </details>
 
 ---
 
-[Сообщить об ошибке](https://github.com/GermanMik/codex-pair-bridge/issues) · [Конфиденциальность](PRIVACY.md) · [Безопасность](SECURITY.md) · [Лицензия MIT](LICENSE)
+[Сообщить об ошибке](https://github.com/GermanMik/pair-bridge/issues) · [Конфиденциальность](PRIVACY.md) · [Безопасность](SECURITY.md) · [Лицензия MIT](LICENSE)

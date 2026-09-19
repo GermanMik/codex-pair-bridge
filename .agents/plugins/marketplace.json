@@ -1,14 +1,14 @@
 {
-  "name": "codex-pair-bridge",
+  "name": "pair-bridge",
   "interface": {
-    "displayName": "Codex Pair Bridge"
+    "displayName": "Pair Bridge"
   },
   "plugins": [
     {
-      "name": "codex-pair-bridge",
+      "name": "pair-bridge",
       "source": {
         "source": "local",
-        "path": "./plugins/codex-pair-bridge"
+        "path": "./plugins/pair-bridge"
       },
       "policy": {
         "installation": "AVAILABLE",

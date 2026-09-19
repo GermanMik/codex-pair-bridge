@@ -1,0 +1,25 @@
+{
+  "name": "pair-bridge",
+  "version": "0.5.0",
+  "description": "Use local models across configured devices from Codex and Oh My Pi through PAIR.",
+  "author": {
+    "name": "GermanMik"
+  },
+  "interface": {
+    "displayName": "PAIR Bridge",
+    "shortDescription": "Consult and manage local models through PAIR.",
+    "longDescription": "Use /pair to inspect devices, choose installed models, compare answers, diagnose failures, and manage model instances safely.",
+    "developerName": "GermanMik",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Use pair_devices and pair_list to inspect installed local models.",
+      "Use pair_smart_ask for a bounded task with an installed model."
+    ]
+  },
+  "mcpServers": "./.mcp.json",
+  "license": "MIT",
+  "repository": "https://github.com/GermanMik/pair-bridge",
+  "homepage": "https://github.com/GermanMik/pair-bridge",
+  "skills": "./skills"
+}

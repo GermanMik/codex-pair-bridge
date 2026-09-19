@@ -14,7 +14,7 @@ Date: 2026-09-19. Scope: local development checkout; no release or deployment.
 | PAIR-08 | OMP has a documented MCP installation path and native command/skill. | `.omp/commands/pair.md`, `.omp/skills/pair/SKILL.md`, `docs/OMP.md`; OMP 18.1.10 installed locally; isolated headless launch reached model setup and stopped because no model/API key was configured. | CONFIG READY; end-to-end OMP session not yet tested |
 | PAIR-09 | Explicit download requires a reviewed, one-use plan and exact repeated model ID. | `test_download_requires_repeated_exact_model`, `test_download_plan_is_one_use_and_exposes_review_fields`, `test_download_plan_rejects_untrusted_url` | PASS in mock; no weights downloaded |
 
-Validation command: `UV_CACHE_DIR=/private/tmp/pair-uv-cache uv run --offline --locked --script ./scripts/server.py --self-test` from `plugins/codex-pair-bridge`. Result: 31 tests passed, including MCP tool discovery.
+Validation command: `UV_CACHE_DIR=/private/tmp/pair-uv-cache uv run --offline --locked --script ./scripts/server.py --self-test` from `plugins/pair-bridge`. Result: 31 tests passed, including MCP tool discovery.
 
 Analysis tools: Graphify rebuilt a temporary code graph (241 nodes, 255 edges); zvec-grep refreshed an index of 56 scanned project files and returned source-linked results for model ownership; EchoVault v0.5.0 retrieved the lifecycle decision and saved the Jev/download-plan decision in a temporary local vault (FTS worked; vector embedding was unavailable in this sandbox). The initial PAIR model consultation had no final text; the live smart-ask smoke test used a larger output budget and returned `OK` without changing loaded state.
 

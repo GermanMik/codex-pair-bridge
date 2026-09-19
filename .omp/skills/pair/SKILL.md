@@ -1,6 +1,6 @@
 ---
 name: pair
-description: Inspect and consult installed PAIR and LM Studio models through the Codex PAIR Bridge MCP server in Oh My Pi.
+description: Inspect and consult installed PAIR and LM Studio models through the PAIR Bridge MCP server in Oh My Pi.
 ---
 
 # PAIR in Oh My Pi

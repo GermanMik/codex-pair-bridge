@@ -1,4 +1,4 @@
-# Codex PAIR Bridge — TODO
+# PAIR Bridge — TODO
 
 Status: implementation in progress after v0.4.0. Checked items have local code and tests; unchecked items still need the stated verification or behavior.
 
@@ -48,4 +48,4 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 - [x] 2. Profile-based installed-model selection (`docs/proof/02-profiles.md`).
 - [x] 3. Two-model comparison with provenance and explicit source-verification workflow; actual findings require Codex file review.
 - [x] 4. Per-device queues, conservative weight budgets, live stages and observed eviction reporting; see `docs/proof/04-resources.md`.
-- [ ] 6. Project rename to pair-bridge.
+- [x] 6. Project/plugin marketplace renamed to pair-bridge; legacy config filename retained for compatibility.

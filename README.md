@@ -1,6 +1,6 @@
 <div align="center">
 
-# Codex PAIR Bridge
+# PAIR Bridge
 
 ### One `/pair` command for the models on all your devices
 
@@ -10,12 +10,12 @@
 
 ![How Codex uses MCP tools to ask local models through PAIR](docs/assets/mcp-explained.png)
 
-[![Tests](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/codex-pair-bridge/actions/workflows/test.yml)
+[![Tests](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
 
 </div>
 
-Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **Codex PAIR Bridge gives Codex tools for consulting PAIR and managing configured LM Studio devices.**
+Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **PAIR Bridge gives Codex tools for consulting PAIR and managing configured LM Studio devices.**
 
 Type `/pair` and choose the **pair** skill, or mention `$pair`. Astra, Sol, and other tool-capable Codex models can then inspect your devices, load an installed model, ask it a bounded question, and unload the exact instance they started.
 
@@ -71,8 +71,8 @@ After installing uv, restart Codex so it can discover it. Confirm uv is availabl
 Run these commands in a terminal:
 
 ```sh
-codex plugin marketplace add GermanMik/codex-pair-bridge
-codex plugin add codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace add GermanMik/pair-bridge
+codex plugin add pair-bridge@pair-bridge
 ```
 
 This adds our GitHub marketplace to Codex. It is a community catalog, separate from OpenAI's universal plugin directory. [About plugin marketplaces](https://developers.openai.com/plugins/build/plugins).
@@ -106,7 +106,7 @@ Model names differ between installations. Let `/pair` inspect the live catalog b
 
 The default address is **`http://127.0.0.1:1234/v1`**. This is the PAIR proxy in the tested setup. Check the endpoint displayed by your PAIR installation if it uses a different port.
 
-To change it, create **`.codex-pair-bridge.json` in your home directory**:
+To change it, create **`.pair-bridge.json` in your home directory**:
 
 ```json
 {
@@ -116,8 +116,8 @@ To change it, create **`.codex-pair-bridge.json` in your home directory**:
 
 | System | Configuration file |
 | --- | --- |
-| macOS / Linux | `~/.codex-pair-bridge.json` |
-| Windows | `%USERPROFILE%\.codex-pair-bridge.json` |
+| macOS / Linux | `~/.pair-bridge.json` |
+| Windows | `%USERPROFILE%\.pair-bridge.json` |
 
 Use your **PAIR router's endpoint**. An individual LM Studio endpoint only provides that server's models. `127.0.0.1` refers to the computer running the bridge.
 
@@ -224,19 +224,30 @@ Oh My Pi users can use the same MCP server and a native `/pair` command. See the
 
 </details>
 
+## Migrating from `codex-pair-bridge`
+
+The marketplace and plugin IDs are now `pair-bridge`. Existing `~/.codex-pair-bridge.json` configuration remains readable; the new `~/.pair-bridge.json` takes precedence if both exist. The local diagnostic cache keeps its old directory name to preserve request history. For an existing installation, run:
+
+```sh
+codex plugin remove codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace remove codex-pair-bridge
+codex plugin marketplace add GermanMik/pair-bridge
+codex plugin add pair-bridge@pair-bridge
+```
+
 ## Update from an earlier version
 
 ```sh
-codex plugin marketplace upgrade codex-pair-bridge
-codex plugin add codex-pair-bridge@codex-pair-bridge
+codex plugin marketplace upgrade pair-bridge
+codex plugin add pair-bridge@pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.4.0 introduced device inventory, model load/unload, and direct device targeting; the new smart, comparison, diagnostic and optional Jev tools are available from this development checkout.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.5.0 adds smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the new `pair-bridge` plugin ID.
 
 ## For contributors
 
 ```sh
-cd plugins/codex-pair-bridge
+cd plugins/pair-bridge
 uv run --locked --script ./scripts/server.py --self-test
 ```
 
@@ -248,12 +259,12 @@ Dependencies are locked in `scripts/server.py.lock`. Update intentionally with `
 <summary><strong>Uninstall</strong></summary>
 
 ```sh
-codex plugin remove codex-pair-bridge@codex-pair-bridge
-codex plugin marketplace remove codex-pair-bridge
+codex plugin remove pair-bridge@pair-bridge
+codex plugin marketplace remove pair-bridge
 ```
 
 </details>
 
 ---
 
-[Report an issue](https://github.com/GermanMik/codex-pair-bridge/issues) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [MIT license](LICENSE)
+[Report an issue](https://github.com/GermanMik/pair-bridge/issues) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [MIT license](LICENSE)
