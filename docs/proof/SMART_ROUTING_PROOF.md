@@ -1,6 +1,6 @@
 # ProofLoop: smart routing and integrations
 
-Date: 2026-09-19. Scope: local development checkout; no release or deployment.
+Initial assessment: 2026-09-19. Updated: 2026-09-20. Scope: local development checkout and installed Codex plugin.
 
 | ID | Acceptance condition | Evidence | Result |
 | --- | --- | --- | --- |
@@ -13,9 +13,11 @@ Date: 2026-09-19. Scope: local development checkout; no release or deployment.
 | PAIR-07 | Jev does not send state without explicit opt-in and validates typed answers. | `test_external_send_requires_explicit_opt_in`, `test_choice_response_is_validated`, `test_score_response_is_validated`, `test_score_rejects_wrong_legend` | PASS in mock; live Jev key unavailable |
 | PAIR-08 | OMP has a documented MCP installation path and native command/skill. | `.omp/commands/pair.md`, `.omp/skills/pair/SKILL.md`, `docs/OMP.md`; OMP 18.1.10 installed locally; isolated headless launch reached model setup and stopped because no model/API key was configured. | CONFIG READY; end-to-end OMP session not yet tested |
 | PAIR-09 | Explicit download requires a reviewed, one-use plan and exact repeated model ID. | `test_download_requires_repeated_exact_model`, `test_download_plan_is_one_use_and_exposes_review_fields`, `test_download_plan_rejects_untrusted_url` | PASS in mock; no weights downloaded |
+| PAIR-10 | Memory plan uses the requested context and loaded instances' actual contexts; configured budget blocks excess use. | `test_memory_preflight_uses_loaded_context_and_blocks_cap`, `test_memory_preflight_fails_closed_when_cap_and_context_unknown`, `test_estimator_accepts_cli_stderr_and_target_port`; live read-only Alfred plan for Qwen3.8 27B at 8,192 tokens included loaded Ornith at 65,536. | PASS for estimate; actual free memory not measured |
+| PAIR-11 | Download plan identifies a single GGUF file, checks local space and rechecks revision before starting. | `test_one_exact_hugging_face_quantization`, `test_ambiguous_repository_does_not_claim_exact_size`, `test_download_plan_uses_verified_size_and_rejects_low_space`, `test_download_rechecks_revision_before_start` | PASS in mock; remote disk and live metadata verification open |
 
-Validation command: `UV_CACHE_DIR=/private/tmp/pair-uv-cache uv run --offline --locked --script ./scripts/server.py --self-test` from `plugins/pair-bridge`. Result: 31 tests passed, including MCP tool discovery.
+Initial validation used 31 tests. Current validation: `uv run --locked --script plugins/pair-bridge/scripts/server.py --self-test` from the repository root; 47 tests passed, including MCP tool discovery.
 
 Analysis tools: Graphify rebuilt a temporary code graph (241 nodes, 255 edges); zvec-grep refreshed an index of 56 scanned project files and returned source-linked results for model ownership; EchoVault v0.5.0 retrieved the lifecycle decision and saved the Jev/download-plan decision in a temporary local vault (FTS worked; vector embedding was unavailable in this sandbox). The initial PAIR model consultation had no final text; the live smart-ask smoke test used a larger output budget and returned `OK` without changing loaded state.
 
-Remaining proof: live cold-load/unload; two-model comparison; Jev API call with a user-provided key and non-sensitive state; OMP MCP connection in a separate project; independent download estimate, destination and free-space validation; device-specific queue/resource limits. Do not claim these are complete.
+Remaining proof: live cold-load/unload; two-model comparison; Jev API call with a user-provided key and non-sensitive state; OMP MCP connection in a separate project; successful live Hugging Face metadata lookup; actual LM Studio storage path and remote free-space verification; measured device memory capacity. Do not claim these are complete.

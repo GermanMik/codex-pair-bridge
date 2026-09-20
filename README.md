@@ -62,6 +62,7 @@ You need:
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** installed and available on your PATH.
 - **PAIR running**, connected to at least one working chat model, for routed requests.
 - **LM Studio 0.4+** with its native API enabled on each device you want Codex to manage.
+- **The LM Studio `lms` CLI on the computer running Bridge** for memory estimates. Remote models are estimated through the existing SSH tunnel; Bridge does not run remote shell commands.
 - **OpenSSH** and a working SSH config alias for remote loopback-only LM Studio endpoints.
 
 After installing uv, restart Codex so it can discover it. Confirm uv is available with `uv --version`.
@@ -150,6 +151,22 @@ Each device may set `max_loaded_bytes` to a positive memory-estimate budget. Bef
 
 Use `pair_memory_plan(device, model, context_length)` to inspect this estimate without loading. The planned context matters: on Alfred, Qwen3.8 27B was estimated at 19.24 GiB for 8,192 tokens and 26.03 GiB for 65,536 tokens. The native inventory reports the actual `loaded_instances[].config.context_length` of a running instance; `max_context_length` is only its supported limit. `size_bytes` describes model weights on disk, not total RAM/VRAM. [LM Studio CLI](https://lmstudio.ai/docs/cli/local-models/load), [model inventory](https://lmstudio.ai/docs/developer/rest/list).
 
+### Plan memory before loading
+
+For an installed but unloaded model, ask Codex to call `pair_memory_plan` with its exact device, model key and intended context:
+
+```json
+{"device":"pc","model":"qwen/qwen3.8-27b","context_length":8192}
+```
+
+The result reports the candidate estimate, estimates for already loaded instances at their actual contexts, and `required_with_headroom_bytes`. To enforce a limit, add `"max_loaded_bytes": 34359738368` (32 GiB) to that device's configuration. A cold load is blocked when the estimate plus 10% exceeds the limit. If the CLI estimate is unavailable, a configured limit blocks the load; without a limit Bridge reports `unknown` and the load may proceed. The limit is a policy you set, **not detected free memory**. Existing loaded models are reused without changing their context. For an already loaded target, `pair_memory_plan` returns its current instance configuration.
+
+### Download a new model explicitly
+
+Downloading is separate from asking or loading. Ask Codex to call `pair_download_plan` with an exact LM Studio catalog ID or a Hugging Face repository URL, a device, and a destination to review. For a Hugging Face GGUF repository, pass `quantization` when needed. For a catalog ID or ambiguous/unreachable metadata, also supply a reviewed `estimated_size_bytes`. The plan has a one-use ID valid for ten minutes; `pair_download(plan_id, confirm_model)` requires the exact model ID again, and `pair_download_status` follows the job. No download starts while creating the plan.
+
+The plan can verify the size of **one unambiguous GGUF file** and its repository revision; it rechecks both before starting. That file size may differ from the complete LM Studio download. Bridge checks free space with 10% headroom only when the target device is local. The destination is supplied for review: LM Studio does not confirm that it is its configured model folder. For remote devices, verify both the actual folder and free space on that device before starting. [LM Studio download API](https://lmstudio.ai/docs/developer/rest/download).
+
 Devices are configured explicitly. PAIR peer discovery does not grant model-management access. Ollama lifecycle management, model deletion, engine installation, and PAIR cluster administration are not implemented. The separate `pair_download` tool requires a one-use `pair_download_plan` and the exact model ID repeated in `confirm_model`; it is never used by `pair_ask` or `pair_smart_ask`.
 
 For an authenticated device, set `api_key_env` to the name of an environment variable containing its token and pass that variable to the MCP process through `.mcp.json` `env_vars`. Keep tokens out of configuration committed to Git and out of prompts.
@@ -169,6 +186,8 @@ The bridge runs on your computer and sends requests to **your configured PAIR en
 | A configured device is unreachable | Verify its LM Studio native API, port, and direct HTTPS or SSH connection. |
 | A model is listed but fails | Inspect PAIR's job details and model-server logs. Catalog entries are not health checks. |
 | A named model is not installed | Run `/pair` inventory and choose an exact installed key; the bridge does not download missing weights. |
+| Memory preflight is unknown or blocks a load | Check that `lms` works on the Bridge computer, use the intended context, and review the device's `max_loaded_bytes` budget. The budget is not a free-memory reading. |
+| Download plan cannot verify size or destination | Use an exact Hugging Face GGUF repository and quantization when available; otherwise provide a reviewed size estimate. Check LM Studio's actual storage folder and remote free space yourself. |
 | HTTP 400 or 500 | Check the exact model ID, model loading, memory availability, and server errors. |
 | Another request is running | Wait for the current bridge call to finish. |
 | Timeout | Check PAIR before retrying: the model job may still be running. |

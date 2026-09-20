@@ -1,6 +1,6 @@
 # PAIR Bridge — TODO
 
-Status: implementation in progress after v0.4.0. Checked items have local code and tests; unchecked items still need the stated verification or behavior.
+Status: implementation in progress. Checked items have local code and tests; unchecked items still need the stated verification or behavior. Current validation: 47 self-tests passed.
 
 ## 1. Connect other agents and decision models
 
@@ -10,7 +10,7 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 ## 2. Smart `/pair ask`
 
 - [x] Refresh live inventory and PAIR routing catalog; expose current check time/status, installed/loaded state and last request outcome, and recheck type/context under the device lock before inference.
-- [ ] Select an **already installed** chat model using the task, device reachability, model type, context capacity and available memory. Exact keys, type, reachability, context and an optional weight-size cap are implemented; actual free RAM/VRAM capacity is not available from the current LM Studio inventory.
+- [ ] Select an **already installed** chat model using the task, device reachability, model type, context capacity and available memory. Exact keys, type, reachability and context are checked; cold loads use a context-aware CLI estimate and optional configured memory budget. Actual free RAM/VRAM is not available from the LM Studio inventory, so automatic capacity-aware ranking remains open.
 - [x] Reuse a suitable loaded instance, or load an installed model when needed. Record the exact instance ID and whether this task created it.
 - [x] Send a bounded request, report model/device, timing, completion status and any truncation, and reject an empty answer; Codex still must verify factual claims.
 - [ ] Unload only an instance created for this task, and only when no other active request depends on it. The bridge serializes per device and preserves pre-existing instances; external LM Studio clients are not visible to its lock. On timeout it leaves the instance loaded for inspection; automatic state inspection/recovery remains.
@@ -20,11 +20,11 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 
 - [x] Compare answers from two explicitly selected installed models sequentially. Each result retains provenance and usage/timing; Codex must verify disputed claims against sources.
 - [x] Add local per-request diagnostics for endpoint reachability, inventory/load stages, queue/load/inference timings, sanitized timeout and empty-answer reasons. Detailed engine-memory telemetry is limited by the available LM Studio API.
-- [x] Add reproducible unit tests for model selection, missing model, simultaneous use, timeout and cleanup; 27 self-tests pass.
+- [x] Add reproducible tests for model selection, missing model, simultaneous use, timeout, cleanup, memory preflight, download review and MCP discovery; 47 self-tests pass.
 
 ## 4. Resource management and optional downloads
 
-- [x] Add per-device 30-second queues, configurable model-weight budgets, live queue/load/inference stage records, load time and observed engine evictions. Exact free RAM/VRAM and streamed load percentage are not exposed by the synchronous LM Studio load endpoint.
+- [x] Add per-device 30-second queues, configurable memory-estimate budgets, live queue/preflight/load/inference stage records, load time and observed engine evictions. Exact free RAM/VRAM and streamed load percentage are not exposed by the synchronous LM Studio load endpoint.
 - [x] Replace the weight-size gate with a context-aware `lms load --estimate-only` preflight for cold loads; include existing instances at their actual contexts, apply 10% headroom to configured memory budgets, expose read-only `pair_memory_plan`, and mark missing estimates unknown. Alfred live check returned Qwen 27B at 8,192 plus Ornith at its loaded 65,536 context. No weights were loaded. [LM Studio CLI](https://lmstudio.ai/docs/cli/local-models/load), [model inventory](https://lmstudio.ai/docs/developer/rest/list).
 - [ ] Measure actual free RAM/VRAM per device and calibrate CLI estimates against observed usage where supported. The LM Studio native inventory does not expose free capacity; `max_loaded_bytes` remains a user-configured budget, not detected hardware capacity. GPU offload and parallel settings may also change estimates.
 - [x] Keep downloads a **separate explicit action**, never part of ask. `pair_download_plan` now checks public Hugging Face metadata for one unambiguous GGUF file and local destination free space with 10% headroom; catalog IDs and ambiguous/sharded files retain a caller estimate with uncertainty. It keeps one-use plan confirmation and job status; it does not start a download to learn its size. [LM Studio download API](https://lmstudio.ai/docs/developer/rest/download).
@@ -50,5 +50,5 @@ Status: implementation in progress after v0.4.0. Checked items have local code a
 - [x] 1. Live inventory and in-lock recheck (`docs/proof/01-inventory.md`).
 - [x] 2. Profile-based installed-model selection (`docs/proof/02-profiles.md`).
 - [x] 3. Two-model comparison with provenance and explicit source-verification workflow; actual findings require Codex file review.
-- [x] 4. Per-device queues, conservative weight budgets, live stages and observed eviction reporting; see `docs/proof/04-resources.md`.
+- [x] 4. Per-device queues, context-aware memory-estimate budgets, live stages and observed eviction reporting; see `docs/proof/04-resources.md`.
 - [x] 6. Project/plugin marketplace renamed to pair-bridge; legacy config filename retained for compatibility.
