@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import difflib
 import management
+import download_review
 import jev
 import diagnostics
 from filelock import FileLock, Timeout
@@ -109,9 +110,9 @@ def checked_models(device: str, rows: list[dict]) -> list[dict]:
 
 
 def resource_summary(rows: list[dict], cap: int | None) -> dict:
-    return {'max_loaded_weight_bytes': cap,
+    return {'max_loaded_bytes': cap,
             'loaded_model_weight_bytes': sum(m.get('size_bytes', 0) for m in rows if m['loaded_instances']),
-            'note': 'Weight-size estimate excludes KV cache and runtime overhead; LM Studio free RAM/VRAM is not exposed here.'}
+            'note': 'These are disk weight sizes, not memory estimates. Cold-load preflight uses the LM Studio CLI and configured context; free RAM/VRAM is not exposed by the API.'}
 
 
 def completion(data: dict, requested_model: str, device: str | None, started: float) -> dict:
@@ -147,10 +148,6 @@ def select_model(inventory: list[dict], model: str | None = None, device: str | 
                 continue
             limit = item.get('max_context_length')
             if isinstance(limit, int) and limit < context_length:
-                continue
-            if max_load_bytes is not None and not item['loaded_instances'] and (
-                not isinstance(item.get('size_bytes'), int) or item['size_bytes'] > max_load_bytes
-            ):
                 continue
             candidates.append((row['device'], item))
     if not candidates:
@@ -304,10 +301,12 @@ def pair_load(device: str, model: str,
         selected = matches[0]
         if selected['loaded_instances']:
             return {'device': device, 'status': 'already_loaded', 'model': selected}
-        management.ensure_capacity(before_rows, selected, management.devices()[device].get('max_loaded_bytes'))
         maximum = selected.get('max_context_length')
         if selected.get('type') == 'llm' and isinstance(maximum, int) and context_length > maximum:
             raise ValueError('Requested context exceeds this model maximum')
+        diagnostics.stage('preflight')
+        memory = management.memory_preflight(device, before_rows, selected, context_length,
+                                             management.devices()[device].get('max_loaded_bytes'))
         body = {'model': model}
         if selected.get('type') == 'llm':
             body['context_length'] = context_length
@@ -320,7 +319,25 @@ def pair_load(device: str, model: str,
         after_ids = {i['id'] for m in after_rows for i in m['loaded_instances']}
         return {'device': device, 'status': 'loaded' if after['loaded_instances'] else 'not_confirmed',
                 'model': after, 'load_time_seconds': load_result.get('load_time_seconds'),
-                'engine_evicted_instances': sorted(before_ids - after_ids)}
+                'engine_evicted_instances': sorted(before_ids - after_ids), 'memory_preflight': memory}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_memory_plan(device: str, model: str,
+                     context_length: Annotated[int, Field(ge=512, le=262144)] = 8192) -> dict:
+    """Estimate memory on the target LM Studio device without loading the installed model."""
+    with inference_lock(device, wait_seconds=30), management.client(device) as c:
+        rows = management.models(c)
+        selected = next((m for m in rows if m['key'] == model), None)
+        if selected is None:
+            raise ValueError('Model is not installed on this device; no download was made')
+        maximum = selected.get('max_context_length')
+        if isinstance(maximum, int) and context_length > maximum:
+            raise ValueError('Requested context exceeds this model maximum')
+        result = management.memory_preflight(device, rows, selected, context_length,
+                                             management.devices()[device].get('max_loaded_bytes'))
+    return {'device': device, 'model': model, 'planned_context_length': context_length,
+            'current_instances': selected['loaded_instances'], 'preflight': result}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
@@ -399,13 +416,15 @@ def pair_smart_ask(
                 if isinstance(actual_context, int) and actual_context < context_length:
                     raise ValueError('Loaded instance context is smaller than requested; choose a smaller context or another model')
             if not instances:
-                diagnostics.stage('load')
+                diagnostics.stage('preflight')
                 before_rows = management.models(c)
                 candidate = next((m for m in before_rows if m['key'] == key), None)
                 if candidate is None:
                     raise ValueError('Selected model disappeared before load; refresh inventory')
-                management.ensure_capacity(before_rows, candidate,
-                                           management.devices()[selected_device].get('max_loaded_bytes'))
+                configured_cap = management.devices()[selected_device].get('max_loaded_bytes')
+                cap = min(configured_cap, max_load_bytes) if configured_cap and max_load_bytes else (configured_cap or max_load_bytes)
+                memory = management.memory_preflight(selected_device, before_rows, candidate, context_length, cap)
+                diagnostics.stage('load')
                 before_ids = {i['id'] for m in before_rows for i in m['loaded_instances']}
                 load_result = management.request(c, 'POST', '/api/v1/models/load', {'model': key, 'context_length': context_length})
                 load_time_seconds = load_result.get('load_time_seconds')
@@ -454,6 +473,7 @@ def pair_smart_ask(
                                               'installed chat model ranked by profile, load state, context and size'),
                             load_time_seconds=load_time_seconds,
                             engine_evicted_instances=engine_evicted_instances,
+                            memory_preflight=memory if owned_id else {'status': 'already_loaded'},
                             router_status=router_status, router_advertises_model=key in router_models)
 
 
@@ -524,9 +544,9 @@ def pair_diagnose() -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
-def pair_download_plan(device: str, model: str, estimated_size_bytes: Annotated[int, Field(ge=1)],
-                       destination: str, quantization: str | None = None) -> dict:
-    """Prepare a one-use download review. Size and destination are caller supplied, not verified by LM Studio.
+def pair_download_plan(device: str, model: str, estimated_size_bytes: Annotated[int | None, Field(ge=1)] = None,
+                       destination: str = '', quantization: str | None = None) -> dict:
+    """Prepare a one-use download review with independent metadata and disk checks.
 
     LM Studio's download API reveals total size only after starting. Inspect the model
     source, expected size and configured storage location independently before planning.
@@ -541,19 +561,32 @@ def pair_download_plan(device: str, model: str, estimated_size_bytes: Annotated[
             raise ValueError('Only exact huggingface.co HTTPS links are accepted as model URLs')
         source = model
     elif re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', model):
+        if quantization:
+            raise ValueError('Quantization is supported only for Hugging Face repository links')
         source = 'LM Studio catalog: ' + model
     else:
         raise ValueError('Use an exact LM Studio catalog ID or huggingface.co model URL')
-    if device not in management.devices():
+    configured = management.devices()
+    if device not in configured:
         raise ValueError('Unknown device. Use pair_devices and an exact configured ID')
+    files = download_review.model_files(model, quantization)
+    verified_bytes = files.get('size_bytes') if files['status'] == 'verified_file' else None
+    planning_bytes = verified_bytes or estimated_size_bytes
+    if planning_bytes is None:
+        raise ValueError('File size is unknown; provide a reviewed estimated_size_bytes before planning')
+    space = download_review.destination_space(configured[device], destination, round(planning_bytes * 1.1))
+    if space['status'] == 'insufficient':
+        raise ValueError('Destination filesystem has less than the planned size plus 10% headroom')
     plan_id = uuid.uuid4().hex
     _DOWNLOAD_PLANS[plan_id] = {'device': device, 'model': model, 'quantization': quantization,
-                                'estimated_size_bytes': estimated_size_bytes,
+                                'estimated_size_bytes': planning_bytes, 'verified_file': files if verified_bytes else None,
                                 'destination': destination, 'created': time.monotonic()}
     return {'plan_id': plan_id, 'device': device, 'model': model, 'source': source,
-            'estimated_disk_and_network_bytes': estimated_size_bytes,
-            'destination': destination, 'quantization': quantization,
-            'notice': 'Estimate and destination are caller supplied and unverified. Review free space and LM Studio storage settings before starting. Plan expires in 10 minutes.'}
+            'estimated_disk_and_network_bytes': planning_bytes,
+            'size_source': 'huggingface_file_metadata' if verified_bytes else 'caller_estimate',
+            'model_file': files, 'destination': destination, 'destination_space': space,
+            'quantization': quantization,
+            'notice': 'Verify LM Studio storage settings and exact model variant. A repository file size may differ from the complete job. Plan expires in 10 minutes; ask never downloads.'}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
@@ -566,6 +599,16 @@ def pair_download(plan_id: str, confirm_model: str) -> dict:
         raise ValueError('Repeat the exact model ID in confirm_model before starting a download')
     del _DOWNLOAD_PLANS[plan_id]
     device, model, quantization = plan['device'], plan['model'], plan['quantization']
+    if plan['verified_file']:
+        current = download_review.model_files(model, quantization)
+        if current.get('status') != 'verified_file' or any(
+            current.get(key) != plan['verified_file'].get(key) for key in ('revision', 'file', 'size_bytes')
+        ):
+            raise ValueError('Hugging Face file metadata changed or is unavailable; prepare a new download plan')
+    space = download_review.destination_space(management.devices()[device], plan['destination'],
+                                              round(plan['estimated_size_bytes'] * 1.1))
+    if space['status'] == 'insufficient':
+        raise ValueError('Destination free space changed; prepare a new download plan')
     with management.client(device) as c:
         body = {'model': model}
         if quantization:

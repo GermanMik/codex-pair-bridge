@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import time
@@ -154,3 +155,64 @@ def ensure_capacity(rows, candidate, max_loaded_bytes):
     incoming = candidate.get('size_bytes')
     if not isinstance(incoming, int) or used + incoming > max_loaded_bytes:
         raise ValueError('Device model-weight limit would be exceeded; no model was unloaded or loaded')
+
+
+def estimate_memory(device_id, model, context_length):
+    """Ask the target LM Studio CLI for a read-only memory estimate."""
+    cli = shutil.which('lms') or str(Path.home() / '.lmstudio' / 'bin' / 'lms')
+    if not Path(cli).is_file():
+        raise ValueError('LM Studio CLI is unavailable; memory estimate is unknown')
+    if not isinstance(context_length, int) or context_length < 1:
+        raise ValueError('A positive planned context length is required')
+    device = devices()[device_id]
+    with endpoint(device) as origin:
+        p = urlsplit(origin)
+        args = [cli, 'load', '--estimate-only', '--context-length', str(context_length),
+                '--host', p.hostname, '--port', str(p.port or (443 if p.scheme == 'https' else 80)), model]
+        try:
+            result = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True,
+                                    text=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError('LM Studio memory estimate is unavailable') from exc
+    if result.returncode:
+        raise ValueError('LM Studio could not estimate this model at the planned context')
+    values = {}
+    for label, key in (('Estimated GPU Memory', 'gpu_bytes'), ('Estimated Total Memory', 'total_bytes')):
+        match = re.search(r'^' + label + r':\s*([\d.,\s\u00a0\u202f]+)\s*(GiB|MiB|GB|MB)',
+                          result.stdout + '\n' + result.stderr, re.MULTILINE)
+        if not match:
+            raise ValueError('LM Studio returned an unrecognized memory estimate')
+        number = float(match.group(1).strip().replace(',', '.').replace(' ', '').replace('\u00a0', '').replace('\u202f', ''))
+        scale = {'GiB': 2**30, 'MiB': 2**20, 'GB': 10**9, 'MB': 10**6}[match.group(2)]
+        values[key] = round(number * scale)
+    return dict(values, context_length=context_length, source='lms load --estimate-only')
+
+
+def memory_preflight(device_id, rows, candidate, context_length, max_loaded_bytes):
+    """Estimate each running instance and the candidate at its actual/planned context."""
+    if candidate['loaded_instances']:
+        return {'status': 'already_loaded'}
+    try:
+        incoming = estimate_memory(device_id, candidate['key'], context_length)
+        current = []
+        for row in rows:
+            for instance in row['loaded_instances']:
+                config = instance.get('config') or {}
+                actual = config.get('context_length')
+                if not isinstance(actual, int) or actual < 1:
+                    raise ValueError('Loaded instance context is unknown')
+                current.append(dict(model=row['key'], instance_id=instance['id'],
+                                    **estimate_memory(device_id, row['key'], actual)))
+        total = incoming['total_bytes'] + sum(item['total_bytes'] for item in current)
+        required = round(total * 1.1)
+        if max_loaded_bytes is not None and required > max_loaded_bytes:
+            raise ValueError('Device estimated memory limit would be exceeded; no model was loaded')
+        return {'status': 'estimated', 'candidate': incoming, 'loaded': current,
+                'estimated_total_bytes': total, 'required_with_headroom_bytes': required,
+                'max_loaded_bytes': max_loaded_bytes,
+                'note': 'CLI estimate, not measured free RAM/VRAM; leave headroom for the OS and other applications.'}
+    except ValueError as exc:
+        if max_loaded_bytes is not None or 'limit would be exceeded' in str(exc):
+            raise
+        return {'status': 'unknown', 'reason': str(exc),
+                'note': 'No configured memory cap; loading may still fail or evict another instance.'}

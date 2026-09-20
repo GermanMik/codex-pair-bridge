@@ -143,7 +143,8 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['cleanup'], 'existing_instance_preserved')
         self.assertEqual([x.args[2] for x in req.call_args_list], ['/v1/chat/completions'])
 
-    def test_smart_ask_loads_and_unloads_only_owned_instance(self):
+    @patch.object(server.management, 'memory_preflight', return_value={'status': 'estimated'})
+    def test_smart_ask_loads_and_unloads_only_owned_instance(self, _preflight):
         cold = {'key': 'cold', 'type': 'llm', 'loaded_instances': []}
         warm = {'key': 'cold', 'type': 'llm', 'loaded_instances': [{'id': 'owned-i'}]}
         snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [cold]}]}
@@ -165,7 +166,8 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual([x.args[2] for x in req.call_args_list],
                          ['/api/v1/models/load', '/v1/chat/completions', '/api/v1/models/unload'])
 
-    def test_timeout_retains_new_instance_for_inspection(self):
+    @patch.object(server.management, 'memory_preflight', return_value={'status': 'estimated'})
+    def test_timeout_retains_new_instance_for_inspection(self, _preflight):
         cold = {'key': 'cold', 'type': 'llm', 'loaded_instances': []}
         warm = {'key': 'cold', 'type': 'llm', 'loaded_instances': [{'id': 'owned-i'}]}
         snapshot = {'devices': [{'device': 'mac', 'online': True, 'models': [cold]}]}
@@ -308,7 +310,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = (await session.list_tools()).tools
-                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload',
+                self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload', 'pair_memory_plan',
                                                           'pair_smart_ask', 'pair_compare', 'pair_diagnose',
                                                           'pair_download_plan', 'pair_download', 'pair_download_status',
                                                           'pair_decide', 'pair_score'})

@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 import contextlib
+import subprocess
 import server
 import management
 
@@ -21,6 +22,37 @@ class ManagementTests(unittest.TestCase):
             management.ensure_capacity([loaded, candidate], candidate, 100)
         management.ensure_capacity([loaded, candidate], candidate, 120)
 
+    def test_memory_preflight_uses_loaded_context_and_blocks_cap(self):
+        loaded = {'key': 'running', 'loaded_instances': [{'id': 'i', 'config': {'context_length': 65536}}]}
+        cold = {'key': 'new', 'loaded_instances': []}
+        with patch.object(management, 'estimate_memory', side_effect=[
+            {'total_bytes': 20, 'gpu_bytes': 20, 'context_length': 8192},
+            {'total_bytes': 30, 'gpu_bytes': 30, 'context_length': 65536}]) as estimate:
+            result = management.memory_preflight('pc', [loaded, cold], cold, 8192, 60)
+        self.assertEqual(result['estimated_total_bytes'], 50)
+        self.assertEqual(estimate.call_args_list[1].args, ('pc', 'running', 65536))
+        with patch.object(management, 'estimate_memory', side_effect=[
+            {'total_bytes': 20, 'gpu_bytes': 20}, {'total_bytes': 30, 'gpu_bytes': 30}]):
+            with self.assertRaisesRegex(ValueError, 'estimated memory limit'):
+                management.memory_preflight('pc', [loaded, cold], cold, 8192, 49)
+
+    def test_memory_preflight_fails_closed_when_cap_and_context_unknown(self):
+        loaded = {'key': 'running', 'loaded_instances': [{'id': 'i'}]}
+        cold = {'key': 'new', 'loaded_instances': []}
+        with patch.object(management, 'estimate_memory', return_value={'total_bytes': 20, 'gpu_bytes': 20}):
+            with self.assertRaisesRegex(ValueError, 'context is unknown'):
+                management.memory_preflight('pc', [loaded, cold], cold, 8192, 100)
+
+    def test_estimator_accepts_cli_stderr_and_target_port(self):
+        output = 'Estimated GPU Memory: 19.24 GiB\nEstimated Total Memory: 20.00 GiB\n'
+        with patch.object(management, 'devices', return_value={'pc': {'base_url': 'http://127.0.0.1:1234'}}), \
+             patch.object(management.shutil, 'which', return_value='/tmp/lms'), \
+             patch.object(management.Path, 'is_file', return_value=True), \
+             patch.object(management.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', output)) as run:
+            result = management.estimate_memory('pc', 'installed-model', 8192)
+        self.assertEqual(result['total_bytes'], 20 * 2**30)
+        self.assertIn('1234', run.call_args.args[0])
+
     def test_reuse_loaded_without_mutation(self):
         model={'key':'m','loaded_instances':[{'id':'instance'}]}
         with patch.object(server, 'inference_lock', self.scope), patch.object(management, 'client', return_value=self.scope()), patch.object(management, 'models', return_value=[model]), patch.object(management, 'request') as req:
@@ -39,12 +71,14 @@ class ManagementTests(unittest.TestCase):
                 server.pair_unload('pc','missing')
             req.assert_not_called()
 
-    def test_load_not_confirmed(self):
+    @patch.object(management, 'memory_preflight', return_value={'status': 'estimated'})
+    def test_load_not_confirmed(self, _preflight):
         m={'key':'m','type':'llm','loaded_instances':[],'max_context_length':8192}
         with patch.object(server, 'inference_lock', self.scope), patch.object(management, 'client', return_value=self.scope()), patch.object(management, 'models', return_value=[m]), patch.object(management, 'devices', return_value={'pc': {}}), patch.object(management, 'find_model', return_value=m), patch.object(management, 'request', return_value={}):
             self.assertEqual(server.pair_load('pc','m')['status'],'not_confirmed')
 
-    def test_load_reports_engine_eviction_without_unloading_itself(self):
+    @patch.object(management, 'memory_preflight', return_value={'status': 'estimated'})
+    def test_load_reports_engine_eviction_without_unloading_itself(self, _preflight):
         other = {'key': 'other', 'type': 'llm', 'size_bytes': 10, 'loaded_instances': [{'id': 'other-i'}]}
         cold = {'key': 'm', 'type': 'llm', 'size_bytes': 20, 'loaded_instances': [], 'max_context_length': 8192}
         warm = dict(cold, loaded_instances=[{'id': 'new-i'}])
