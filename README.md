@@ -9,7 +9,7 @@ Discover models across devices · ask for a second opinion · compare answers ·
 
 [Get started](#get-started) · [See how MCP works](#what-does-mcp-actually-do) · [Explore the tools](#tool-reference) · [Русский](README.ru.md)
 
-![How Codex uses MCP tools to ask local models through PAIR](docs/assets/mcp-explained.png)
+![PAIR Bridge connects Codex through MCP to local models via PAIR routing or direct LM Studio devices](docs/assets/mcp-explained.png)
 
 [![Tests](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
@@ -46,6 +46,8 @@ Think of the workflow as four jobs:
 | **Local model** | Generate an answer. | Return review comments to Codex. |
 
 **MCP is the tool connection; PAIR is the model router.** The bridge does not turn a local model into the main Codex model. Codex continues coordinating your task, and the consulted model returns text for Codex to assess.
+
+The diagram shows both supported paths: PAIR can route a request, or the bridge can target a configured LM Studio device directly.
 
 ## A real example
 
