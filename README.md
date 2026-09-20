@@ -275,7 +275,7 @@ codex plugin marketplace upgrade pair-bridge
 codex plugin add pair-bridge@pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.0 adds measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata. Version 0.5.0 added smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the `pair-bridge` plugin ID.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.1 fixes free-memory sampling when Bridge runs locally on Windows. Version 0.6.0 added measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata. Version 0.5.0 added smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the `pair-bridge` plugin ID.
 
 ## For contributors
 

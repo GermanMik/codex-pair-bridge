@@ -79,6 +79,14 @@ class OperationsTests(unittest.TestCase):
             result = telemetry.sample({'base_url': 'http://127.0.0.1:1234'})
         self.assertIsNone(result['models_disk'])
 
+    def test_local_windows_memory_sample(self):
+        with patch.object(telemetry.platform, 'system', return_value='Windows'), \
+             patch.object(telemetry, '_run', return_value='{"total_bytes":34359738368,"available_bytes":17179869184}') as run:
+            result = telemetry._local_memory()
+        self.assertEqual(result['available_bytes'], 17179869184)
+        self.assertEqual(result['kind'], 'windows_free_physical')
+        self.assertIn('-EncodedCommand', run.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()

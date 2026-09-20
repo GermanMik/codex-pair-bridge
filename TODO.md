@@ -1,6 +1,6 @@
 # PAIR Bridge — TODO
 
-Status: implementation in progress. Checked items have local code and tests; unchecked items still need the stated verification or behavior. Current validation: 52 self-tests passed.
+Status: implementation in progress. Checked items have local code and tests; unchecked items still need the stated verification or behavior. Current validation: 53 self-tests passed.
 
 ## 1. Connect other agents and decision models
 
@@ -20,7 +20,7 @@ Status: implementation in progress. Checked items have local code and tests; unc
 
 - [x] Compare answers from two explicitly selected installed models sequentially. Each result retains provenance and usage/timing; Codex must verify disputed claims against sources.
 - [x] Add local per-request diagnostics for endpoint reachability, inventory/load stages, queue/load/inference timings, sanitized timeout and empty-answer reasons. Detailed engine-memory telemetry is limited by the available LM Studio API.
-- [x] Add reproducible tests for model selection, missing model, simultaneous use, timeout, cleanup, memory preflight, download review, cancellation and MCP discovery; 52 self-tests pass.
+- [x] Add reproducible tests for model selection, missing model, simultaneous use, timeout, cleanup, memory preflight, download review, cancellation and MCP discovery; 53 self-tests pass.
 
 ## 4. Resource management and optional downloads
 

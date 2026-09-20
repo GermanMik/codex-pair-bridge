@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import platform
+import base64
 from pathlib import Path
 import re
 import shutil
@@ -34,6 +35,17 @@ def _local_memory() -> dict:
         values = {key: int(value) * 1024 for key, value in
                   re.findall(r'^(MemTotal|MemAvailable):\s*(\d+) kB', Path('/proc/meminfo').read_text(), re.MULTILINE)}
         return {'total_bytes': values['MemTotal'], 'available_bytes': values['MemAvailable'], 'kind': 'linux_memavailable'}
+    if system == 'Windows':
+        script = ('$os = Get-CimInstance Win32_OperatingSystem; '
+                  '@{total_bytes=([int64]$os.TotalVisibleMemorySize)*1024; '
+                  'available_bytes=([int64]$os.FreePhysicalMemory)*1024} | ConvertTo-Json -Compress')
+        encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
+        data = json.loads(_run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded]))
+        if not isinstance(data, dict) or not all(isinstance(data.get(key), int) and data[key] >= 0
+                                                  for key in ('total_bytes', 'available_bytes')):
+            raise ValueError('Cannot parse Windows memory counters')
+        return {'total_bytes': data['total_bytes'], 'available_bytes': data['available_bytes'],
+                'kind': 'windows_free_physical'}
     return {'status': 'unknown', 'reason': 'No local telemetry adapter for this operating system'}
 
 
