@@ -1,6 +1,6 @@
 # PAIR Bridge — TODO
 
-Status: implementation in progress. Checked items have local code and tests; unchecked items still need the stated verification or behavior. Current validation: 47 self-tests passed.
+Status: implementation in progress. Checked items have local code and tests; unchecked items still need the stated verification or behavior. Current validation: 52 self-tests passed.
 
 ## 1. Connect other agents and decision models
 
@@ -10,25 +10,31 @@ Status: implementation in progress. Checked items have local code and tests; unc
 ## 2. Smart `/pair ask`
 
 - [x] Refresh live inventory and PAIR routing catalog; expose current check time/status, installed/loaded state and last request outcome, and recheck type/context under the device lock before inference.
-- [ ] Select an **already installed** chat model using the task, device reachability, model type, context capacity and available memory. Exact keys, type, reachability and context are checked; cold loads use a context-aware CLI estimate and optional configured memory budget. Actual free RAM/VRAM is not available from the LM Studio inventory, so automatic capacity-aware ranking remains open.
+- [x] Select an **already installed** chat model using task profile, reachability, context capacity, fresh device RAM/VRAM samples and recent local benchmark metrics when available. Unknown capacity remains explicit; ranking across devices still needs representative live benchmarks.
 - [x] Reuse a suitable loaded instance, or load an installed model when needed. Record the exact instance ID and whether this task created it.
 - [x] Send a bounded request, report model/device, timing, completion status and any truncation, and reject an empty answer; Codex still must verify factual claims.
 - [ ] Unload only an instance created for this task, and only when no other active request depends on it. The bridge serializes per device and preserves pre-existing instances; external LM Studio clients are not visible to its lock. On timeout it leaves the instance loaded for inspection; automatic state inspection/recovery remains.
-- [ ] Handle no suitable model, failed load, device loss and cancellation with explicit results; never silently switch devices or models. Explicit errors and no fallback are implemented; cancellation handling still needs work.
+- [x] Handle no suitable model, failed load, device loss and cancellation with explicit results; never silently switch devices or models. `pair_job_cancel` stops its HTTP stream, while cancellation of LM Studio's internal generation cannot be guaranteed.
 
 ## 3. Compare and diagnose
 
 - [x] Compare answers from two explicitly selected installed models sequentially. Each result retains provenance and usage/timing; Codex must verify disputed claims against sources.
 - [x] Add local per-request diagnostics for endpoint reachability, inventory/load stages, queue/load/inference timings, sanitized timeout and empty-answer reasons. Detailed engine-memory telemetry is limited by the available LM Studio API.
-- [x] Add reproducible tests for model selection, missing model, simultaneous use, timeout, cleanup, memory preflight, download review and MCP discovery; 47 self-tests pass.
+- [x] Add reproducible tests for model selection, missing model, simultaneous use, timeout, cleanup, memory preflight, download review, cancellation and MCP discovery; 52 self-tests pass.
 
 ## 4. Resource management and optional downloads
 
 - [x] Add per-device 30-second queues, configurable memory-estimate budgets, live queue/preflight/load/inference stage records, load time and observed engine evictions. Exact free RAM/VRAM and streamed load percentage are not exposed by the synchronous LM Studio load endpoint.
 - [x] Replace the weight-size gate with a context-aware `lms load --estimate-only` preflight for cold loads; include existing instances at their actual contexts, apply 10% headroom to configured memory budgets, expose read-only `pair_memory_plan`, and mark missing estimates unknown. Alfred live check returned Qwen 27B at 8,192 plus Ornith at its loaded 65,536 context. No weights were loaded. [LM Studio CLI](https://lmstudio.ai/docs/cli/local-models/load), [model inventory](https://lmstudio.ai/docs/developer/rest/list).
-- [ ] Measure actual free RAM/VRAM per device and calibrate CLI estimates against observed usage where supported. The LM Studio native inventory does not expose free capacity; `max_loaded_bytes` remains a user-configured budget, not detected hardware capacity. GPU offload and parallel settings may also change estimates.
+- [ ] Calibrate CLI estimates against observed usage across model/context/GPU-offload combinations. Fresh RAM/VRAM samples are now available on configured devices and block clearly oversized cold loads; `max_loaded_bytes` remains a separate user policy.
 - [x] Keep downloads a **separate explicit action**, never part of ask. `pair_download_plan` now checks public Hugging Face metadata for one unambiguous GGUF file and local destination free space with 10% headroom; catalog IDs and ambiguous/sharded files retain a caller estimate with uncertainty. It keeps one-use plan confirmation and job status; it does not start a download to learn its size. [LM Studio download API](https://lmstudio.ai/docs/developer/rest/download).
-- [ ] Verify LM Studio's actual configured storage path and remote-device free space before claiming a destination is checked. The API does not expose these settings; current plans label them unverified.
+- [ ] Discover LM Studio's actual configured storage path automatically. An explicitly configured `models_path` can now be checked for free space on Mac or Alfred; unknown paths remain unverified.
+
+## Current additions: measured routing and request lifecycle
+
+- [x] Prompt-free local benchmark metrics for 3–12 reviewed cases per profile; recent pass rate and latency can influence `pair_smart_ask`.
+- [x] Background jobs with stage/progress updates, partial response, cancellation and journal-backed recovery metadata; no prompt or answer is written to the journal.
+- [ ] Run representative live benchmark suites on both devices and verify a successful long-running job after the async streaming change.
 
 ## Delivery workflow
 

@@ -6,8 +6,12 @@
 from __future__ import annotations
 
 import contextlib
+import asyncio
 import difflib
 import management
+import telemetry
+import benchmarks
+import jobs
 import download_review
 import jev
 import diagnostics
@@ -152,22 +156,84 @@ def select_model(inventory: list[dict], model: str | None = None, device: str | 
             candidates.append((row['device'], item))
     if not candidates:
         raise ValueError('No suitable installed chat model on an online configured device; no download was made')
+    scores = benchmarks.summaries(task_hint, context_length) if model is None else {}
+    qualified = any(score['pass_rate'] >= .6 for score in scores.values())
     def rank(row):
         target, item = row
         loaded = bool(item['loaded_instances'])
         size = item.get('size_bytes') if isinstance(item.get('size_bytes'), int) else 1 << 62
         capacity = item.get('max_context_length') if isinstance(item.get('max_context_length'), int) else 0
         code_hint = any(term in item['key'].lower() for term in ('code', 'coder', 'devstral'))
+        score = scores.get((target, item['key']))
+        if qualified:
+            if score and score['pass_rate'] >= .6:
+                primary = (0, score['median_latency_ms'], -score['pass_rate']) if task_hint == 'fast' else (0, -score['pass_rate'], score['median_latency_ms'])
+            else:
+                primary = (1, 0, 0)
+        else:
+            primary = (0, 0, 0)
         if task_hint == 'code':
-            return (not code_hint, not loaded, -capacity, size, target, item['key'])
+            return (*primary, not code_hint, not loaded, -capacity, size, target, item['key'])
         if task_hint == 'fast':
-            return (not loaded, size, target, item['key'])
+            return (*primary, not loaded, size, target, item['key'])
         if task_hint == 'long_context':
-            return (-capacity, not loaded, size, target, item['key'])
+            return (*primary, -capacity, not loaded, size, target, item['key'])
         if task_hint == 'analysis':
-            return (not loaded, -capacity, -size, target, item['key'])
-        return (not loaded, size, target, item['key'])
+            return (*primary, not loaded, -capacity, -size, target, item['key'])
+        return (*primary, not loaded, size, target, item['key'])
     return min(candidates, key=rank)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+@diagnostics.traced
+def pair_benchmark(device: str, model: str,
+                   profile: Annotated[str, Field(pattern='^(general|code|fast|long_context|analysis)$')],
+                   cases: list[dict[str, str]]) -> dict:
+    """Run 3–12 objective substring checks on one already loaded model; save only metrics."""
+    if not 3 <= len(cases) <= 12 or any(
+        not isinstance(case, dict) or not isinstance(case.get('prompt'), str) or
+        not isinstance(case.get('expected_contains'), str) or
+        not 1 <= len(case['prompt']) <= 4000 or not 1 <= len(case['expected_contains']) <= 200
+        for case in cases
+    ):
+        raise ValueError('Provide 3–12 cases with prompt and expected_contains within size limits')
+    diagnostics.stage('queue', device=device, model=model)
+    with inference_lock(device, wait_seconds=30), management.client(device) as c:
+        selected = management.find_model(c, model)
+        if selected.get('type') != 'llm' or len(selected['loaded_instances']) != 1:
+            raise ValueError('Benchmark requires one already loaded chat instance; no model was loaded')
+        instance = selected['loaded_instances'][0]
+        config = instance.get('config') or {}
+        context_length = config.get('context_length')
+        if not isinstance(context_length, int):
+            raise ValueError('Loaded context is unknown; benchmark cannot be attributed')
+        outcomes = []
+        for index, case in enumerate(cases):
+            diagnostics.stage('inference')
+            started = time.monotonic()
+            try:
+                data = management.request(c, 'POST', '/v1/chat/completions',
+                                          {'model': instance['id'], 'messages': [{'role': 'user', 'content': case['prompt']}],
+                                           'max_tokens': 2048, 'temperature': 0, 'stream': False})
+                answer = completion(data, model, device, started)['answer']
+                passed = case['expected_contains'].casefold() in answer.casefold()
+                status = 'pass' if passed else 'mismatch'
+            except ValueError as exc:
+                passed, status = False, diagnostics.reason(exc)
+            outcomes.append({'case': index + 1, 'passed': passed, 'status': status,
+                             'latency_ms': round((time.monotonic() - started) * 1000)})
+        summary = benchmarks.save(device, model, profile, context_length, outcomes)
+    return {'device': device, 'model': model, 'profile': profile, 'summary': summary,
+            'cases': outcomes, 'notice': 'Exact substring checks measure this suite only; prompts and answers were not saved.'}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_benchmark_results(profile: Annotated[str, Field(pattern='^(general|code|fast|long_context|analysis)$')],
+                           context_length: Annotated[int, Field(ge=512, le=262144)] = 8192) -> dict:
+    """Read recent benchmark metrics used by automatic model selection."""
+    scores = benchmarks.summaries(profile, context_length)
+    return {'profile': profile, 'minimum_context_length': context_length,
+            'results': [dict(device=d, model=m, **value) for (d, m), value in sorted(scores.items())]}
 
 
 @contextlib.contextmanager
@@ -274,7 +340,8 @@ def pair_devices() -> dict:
                 result.append({'device': name, 'online': True,
                                'checked_at': datetime.now(timezone.utc).isoformat(),
                                'models': checked_models(name, models),
-                               'resources': resource_summary(models, config.get('max_loaded_bytes'))})
+                               'resources': resource_summary(models, config.get('max_loaded_bytes')),
+                               'capacity': telemetry.sample(config)})
         except ValueError as exc:
             result.append({'device': name, 'online': False,
                            'checked_at': datetime.now(timezone.utc).isoformat(),
@@ -306,7 +373,8 @@ def pair_load(device: str, model: str,
             raise ValueError('Requested context exceeds this model maximum')
         diagnostics.stage('preflight')
         memory = management.memory_preflight(device, before_rows, selected, context_length,
-                                             management.devices()[device].get('max_loaded_bytes'))
+                                             management.devices()[device].get('max_loaded_bytes'),
+                                             telemetry.sample(management.devices()[device]))
         body = {'model': model}
         if selected.get('type') == 'llm':
             body['context_length'] = context_length
@@ -335,7 +403,8 @@ def pair_memory_plan(device: str, model: str,
         if isinstance(maximum, int) and context_length > maximum:
             raise ValueError('Requested context exceeds this model maximum')
         result = management.memory_preflight(device, rows, selected, context_length,
-                                             management.devices()[device].get('max_loaded_bytes'))
+                                             management.devices()[device].get('max_loaded_bytes'),
+                                             telemetry.sample(management.devices()[device]))
     return {'device': device, 'model': model, 'planned_context_length': context_length,
             'current_instances': selected['loaded_instances'], 'preflight': result}
 
@@ -391,6 +460,7 @@ def pair_smart_ask(
     snapshot = pair_devices()
     selected_device, selected = select_model(snapshot['devices'], model, device, context_length,
                                              task_hint, max_load_bytes)
+    measured = benchmarks.summaries(task_hint, context_length).get((selected_device, selected['key'])) if model is None else None
     diagnostics.stage('queue', device=selected_device, model=selected['key'])
     with inference_lock(selected_device, wait_seconds=30):
         key = selected['key']
@@ -423,7 +493,8 @@ def pair_smart_ask(
                     raise ValueError('Selected model disappeared before load; refresh inventory')
                 configured_cap = management.devices()[selected_device].get('max_loaded_bytes')
                 cap = min(configured_cap, max_load_bytes) if configured_cap and max_load_bytes else (configured_cap or max_load_bytes)
-                memory = management.memory_preflight(selected_device, before_rows, candidate, context_length, cap)
+                memory = management.memory_preflight(selected_device, before_rows, candidate, context_length, cap,
+                                                     telemetry.sample(management.devices()[selected_device]))
                 diagnostics.stage('load')
                 before_ids = {i['id'] for m in before_rows for i in m['loaded_instances']}
                 load_result = management.request(c, 'POST', '/api/v1/models/load', {'model': key, 'context_length': context_length})
@@ -470,11 +541,207 @@ def pair_smart_ask(
                             loaded_for_request=bool(owned_id), cleanup=cleanup,
                             selection_profile=task_hint,
                             selection_reason=('explicit model/device' if model or device else
-                                              'installed chat model ranked by profile, load state, context and size'),
+                                              (f"benchmark: {measured['passed']}/{measured['cases']} cases, "
+                                               f"median {measured['median_latency_ms']} ms" if measured and measured['pass_rate'] >= .6 else
+                                               'installed chat model ranked by profile, load state, context and size')),
                             load_time_seconds=load_time_seconds,
                             engine_evicted_instances=engine_evicted_instances,
                             memory_preflight=memory if owned_id else {'status': 'already_loaded'},
                             router_status=router_status, router_advertises_model=key in router_models)
+
+
+async def _job_stream(job: jobs.Job, c: httpx.AsyncClient, instance_id: str, prompt: str, max_tokens: int) -> str:
+    """Consume LM Studio native SSE; retain message text only, never reasoning/tool content."""
+    payload = {'model': instance_id, 'input': prompt, 'max_output_tokens': max_tokens,
+               'stream': True, 'store': False, 'integrations': []}
+    ended = False
+    async with c.stream('POST', '/api/v1/chat', json=payload) as response:
+        if not response.is_success:
+            raise ValueError(f'Device returned HTTP {response.status_code}; no retry was made')
+        if job.cancel_event.is_set():
+            raise asyncio.CancelledError()
+        event_type, data_text = None, ''
+        async for line in response.aiter_lines():
+            if job.cancel_event.is_set():
+                raise asyncio.CancelledError()
+            if line.startswith('event:'):
+                event_type = line[6:].strip()
+            elif line.startswith('data:'):
+                data_text += line[5:].strip()
+                if len(data_text) > 1_000_000:
+                    raise ValueError('Device SSE event exceeded size limit')
+            elif not line and data_text:
+                try:
+                    data = json.loads(data_text)
+                except ValueError as exc:
+                    raise ValueError('Device returned invalid SSE JSON') from exc
+                if not isinstance(data, dict):
+                    raise ValueError('Device returned invalid SSE event')
+                kind = data.get('type') or event_type
+                if kind in ('model_load.progress', 'prompt_processing.progress'):
+                    progress = data.get('progress')
+                    if isinstance(progress, (int, float)) and 0 <= progress <= 1:
+                        job.update(stage=kind, progress=round(progress, 3))
+                elif kind in ('model_load.start', 'prompt_processing.start', 'reasoning.start', 'message.start'):
+                    job.update(stage=kind, progress=None)
+                elif kind == 'message.delta' and isinstance(data.get('content'), str):
+                    job.add_text(data['content'])
+                    job.update(stage='generating', progress=None)
+                elif kind == 'error':
+                    raise ValueError('Device reported a streaming error')
+                elif kind == 'chat.end':
+                    result = data.get('result') or {}
+                    output = result.get('output') if isinstance(result, dict) else None
+                    if isinstance(output, list):
+                        final = ''.join(x.get('content', '') for x in output
+                                        if isinstance(x, dict) and x.get('type') == 'message' and isinstance(x.get('content'), str))
+                        if final:
+                            with job.lock:
+                                if not job.cancel_event.is_set():
+                                    job.answer = final[:48000]
+                    ended = True
+                event_type, data_text = None, ''
+    if job.cancel_event.is_set():
+        raise asyncio.CancelledError()
+    if not ended:
+        raise ValueError('Device stream ended before chat.end')
+    if not job.answer.strip():
+        raise ValueError('Model returned no final text')
+    return job.answer
+
+
+def _run_job(job: jobs.Job, prompt: str, context_length: int, max_tokens: int, unload_after: bool) -> None:
+    owned_id = None
+    try:
+        with inference_lock(job.device, wait_seconds=30), management.client(job.device) as c:
+            if job.cancel_event.is_set():
+                job.update(status='cancelled', stage='cancelled')
+                return
+            job.update(status='running', stage='inventory')
+            rows = management.models(c)
+            selected = next((m for m in rows if m['key'] == job.model), None)
+            if selected is None or selected.get('type') != 'llm':
+                raise ValueError('Model is not an installed chat LLM on this device')
+            maximum = selected.get('max_context_length')
+            if isinstance(maximum, int) and context_length > maximum:
+                raise ValueError('Requested context exceeds model maximum')
+            instances = selected['loaded_instances']
+            if len(instances) > 1:
+                raise ValueError('Multiple model instances are loaded; choose one explicitly')
+            if instances:
+                actual = (instances[0].get('config') or {}).get('context_length')
+                if isinstance(actual, int) and actual < context_length:
+                    raise ValueError('Loaded instance context is smaller than requested')
+                instance_id = instances[0]['id']
+            else:
+                job.update(stage='preflight')
+                config = management.devices()[job.device]
+                management.memory_preflight(job.device, rows, selected, context_length,
+                                            config.get('max_loaded_bytes'), telemetry.sample(config))
+                if job.cancel_event.is_set():
+                    job.update(status='cancelled', stage='cancelled')
+                    return
+                job.update(stage='loading')
+                loaded = management.request(c, 'POST', '/api/v1/models/load',
+                                            {'model': job.model, 'context_length': context_length})
+                instance_id = loaded.get('instance_id')
+                if not isinstance(instance_id, str) or not instance_id:
+                    raise ValueError('Load response had no instance ID')
+                owned_id = instance_id
+                job.update(instance_id=instance_id, owned=True)
+                confirmed = management.find_model(c, job.model)['loaded_instances']
+                if not any(row['id'] == instance_id for row in confirmed):
+                    raise ValueError('Loaded instance could not be confirmed')
+            job.update(instance_id=instance_id)
+            if job.cancel_event.is_set():
+                if owned_id:
+                    management.request(c, 'POST', '/api/v1/models/unload', {'instance_id': owned_id})
+                    job.update(cleanup='unloaded_before_inference')
+                job.update(status='cancelled', stage='cancelled')
+                return
+            job.update(stage='inference')
+            async def stream_request():
+                async with httpx.AsyncClient(base_url=str(c.base_url), headers=c.headers,
+                                             timeout=180, trust_env=False, follow_redirects=False) as stream_client:
+                    return await _job_stream(job, stream_client, instance_id, prompt, max_tokens)
+            loop = asyncio.new_event_loop()
+            try:
+                task = loop.create_task(stream_request())
+                with job.lock:
+                    job.loop, job.task = loop, task
+                    if job.cancel_event.is_set():
+                        loop.call_soon(task.cancel)
+                loop.run_until_complete(task)
+            finally:
+                with job.lock:
+                    job.loop, job.task = None, None
+                loop.close()
+            if job.cancel_event.is_set():
+                job.update(status='cancelled', stage='cancelled')
+                return
+            cleanup = 'existing_instance_preserved'
+            if owned_id:
+                cleanup = 'new_instance_retained'
+                if unload_after:
+                    current = management.find_model(c, job.model)['loaded_instances']
+                    if len(current) == 1 and current[0]['id'] == owned_id:
+                        management.request(c, 'POST', '/api/v1/models/unload', {'instance_id': owned_id})
+                        cleanup = 'unloaded' if not management.find_model(c, job.model)['loaded_instances'] else 'not_confirmed'
+                    else:
+                        cleanup = 'state_changed_preserved'
+            job.update(status='completed', stage='completed', progress=1, cleanup=cleanup)
+    except asyncio.CancelledError:
+        job.update(status='cancelled', stage='cancelled',
+                   cleanup='new_instance_preserved_for_inspection' if owned_id else job.cleanup)
+    except Exception as exc:
+        if job.cancel_event.is_set():
+            job.update(status='cancelled', stage='cancelled',
+                       cleanup='new_instance_preserved_for_inspection' if owned_id and job.cleanup != 'unloaded_before_inference' else job.cleanup)
+        else:
+            job.update(status='failed', stage='failed', error_code=diagnostics.reason(exc),
+                       cleanup='new_instance_preserved_for_inspection' if owned_id else job.cleanup)
+    finally:
+        with job.lock:
+            job.response = None
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def pair_job_start(device: str, model: str, prompt: Annotated[str, Field(min_length=1, max_length=48000)],
+                   context_length: Annotated[int, Field(ge=512, le=262144)] = 8192,
+                   max_tokens: Annotated[int, Field(ge=32, le=8192)] = 2048,
+                   unload_after: bool = True) -> dict:
+    """Start an installed-model job with pollable progress; no download or fallback."""
+    if device not in management.devices() or not prompt.strip():
+        raise ValueError('Use an exact configured device and nonblank prompt')
+    return jobs.create(device, model, _run_job, prompt, context_length, max_tokens, unload_after)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_job_status(job_id: str) -> dict:
+    """Read current progress and final answer; interrupted jobs retain prompt-free recovery metadata."""
+    return jobs.get(job_id)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def pair_job_cancel(job_id: str) -> dict:
+    """Request cancellation. Loading may finish first; an inference instance is preserved for inspection."""
+    return jobs.cancel(job_id)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def pair_job_recover(job_id: str) -> dict:
+    """Inspect the exact instance after interruption; never unload or retry automatically."""
+    state = jobs.get(job_id)
+    instance_id = state.get('instance_id')
+    if not instance_id:
+        return dict(state, recovery='no_owned_instance_recorded')
+    try:
+        with management.client(state['device']) as c:
+            rows = management.models(c)
+        present = any(i['id'] == instance_id for row in rows for i in row['loaded_instances'])
+        return dict(state, recovery='instance_present' if present else 'instance_absent')
+    except ValueError:
+        return dict(state, recovery='device_unreachable')
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

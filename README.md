@@ -158,7 +158,7 @@ Use the real native API origin from each LM Studio installation; the ports above
 
 Each device may set `max_loaded_bytes` to a positive memory-estimate budget. Before a cold load Bridge uses the local `lms` CLI through the existing device tunnel to estimate the candidate at the requested context and every loaded instance at its actual context. It blocks a load if the summed estimate plus 10% headroom exceeds the budget. Without a configured budget, an unavailable estimate is reported as unknown but does not block loading. This is not a measurement of free RAM/VRAM; choose a budget that leaves space for the OS and other applications. Calls wait up to 30 seconds in a per-device queue, and `/pair diagnose` shows queued/loading/inference stages while active. Load results include LM Studio load time and any instances that disappeared during loading. Bridge only auto-unloads the exact instance it loaded for the request. [LM Studio Idle TTL and Auto-Evict](https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict) apply to JIT loads according to server settings; Bridge does not change those settings.
 
-Use `pair_memory_plan(device, model, context_length)` to inspect this estimate without loading. The planned context matters: on Alfred, Qwen3.8 27B was estimated at 19.24 GiB for 8,192 tokens and 26.03 GiB for 65,536 tokens. The native inventory reports the actual `loaded_instances[].config.context_length` of a running instance; `max_context_length` is only its supported limit. `size_bytes` describes model weights on disk, not total RAM/VRAM. [LM Studio CLI](https://lmstudio.ai/docs/cli/local-models/load), [model inventory](https://lmstudio.ai/docs/developer/rest/list).
+Use `pair_memory_plan(device, model, context_length)` to inspect this estimate without loading. The planned context matters: on Alfred, Qwen3.8 27B was estimated at 19.24 GiB for 8,192 tokens and 26.03 GiB for 65,536 tokens. The native inventory reports the actual `loaded_instances[].config.context_length` of a running instance; `max_context_length` is only its supported limit. `size_bytes` describes model weights on disk, not total RAM/VRAM. `pair_devices` now also reports fresh available RAM, NVIDIA VRAM where present, and free disk space. [LM Studio CLI](https://lmstudio.ai/docs/cli/local-models/load), [model inventory](https://lmstudio.ai/docs/developer/rest/list).
 
 ### Plan memory before loading
 
@@ -168,7 +168,7 @@ For an installed but unloaded model, ask Codex to call `pair_memory_plan` with i
 {"device":"pc","model":"qwen/qwen3.8-27b","context_length":8192}
 ```
 
-The result reports the candidate estimate, estimates for already loaded instances at their actual contexts, and `required_with_headroom_bytes`. To enforce a limit, add `"max_loaded_bytes": 34359738368` (32 GiB) to that device's configuration. A cold load is blocked when the estimate plus 10% exceeds the limit. If the CLI estimate is unavailable, a configured limit blocks the load; without a limit Bridge reports `unknown` and the load may proceed. The limit is a policy you set, **not detected free memory**. Existing loaded models are reused without changing their context. For an already loaded target, `pair_memory_plan` returns its current instance configuration.
+The result reports the candidate estimate, estimates for already loaded instances at their actual contexts, `required_with_headroom_bytes`, and a fresh device-capacity sample. A cold load is blocked if the estimated additional need plus 10% exceeds measured available RAM or NVIDIA VRAM. You can also set `"max_loaded_bytes": 34359738368` (32 GiB) as an independent total-load policy. Unknown estimates or capacity are shown as unknown; a configured budget still fails closed when estimation is unavailable. Existing loaded models are reused without changing their context.
 
 ### Download a new model explicitly
 
@@ -224,16 +224,18 @@ Example arguments for `pair_ask` (replace the model ID):
 
 | Tool | Inputs | Returns |
 | --- | --- | --- |
-| `pair_devices` | None | Reachability plus installed and loaded model inventory for every configured device. |
+| `pair_devices` | None | Reachability, installed/loaded inventory, timestamped free RAM, NVIDIA VRAM and disk capacity for every configured device. |
 | `pair_list` | Optional `device` | PAIR catalog, or native inventory for one device. |
 | `pair_load` | `device`, `model`, optional `context_length` | Reused or newly loaded instance and its exact instance ID. |
 | `pair_memory_plan` | `device`, installed `model`, optional `context_length` | Read-only CLI estimate for a cold load, including already loaded instances at their actual contexts. |
 | `pair_unload` | `device`, `instance_id` | Confirmation that one exact instance is no longer observed. |
 | `pair_ask` | `model`, `prompt`, optional `device`, `max_tokens` | Answer, selected model, completion status, timing and usage when available. |
 | `pair_smart_ask` | `prompt`; optional `model`, `device`, `task_hint` (`general`, `code`, `fast`, `long_context`, `analysis`), `context_length`, `max_tokens`, `unload_after` | Chooses from live installed device inventories, loads if needed, asks once and reports cleanup. No download or silent fallback. |
+| `pair_benchmark` / `pair_benchmark_results` | Exact loaded device/model, profile and 3–12 cases with `prompt` and literal `expected_contains` | Measures pass count and latency. Recent results influence smart routing; only metrics are saved. Use representative, reviewed cases. |
+| `pair_job_start` / `pair_job_status` / `pair_job_cancel` / `pair_job_recover` | Exact device/model and prompt to start; job ID thereafter | Bounded background request with loading, prompt, response and cleanup stages, partial text, cancellation and journal-backed recovery metadata. |
 | `pair_compare` | `prompt`, two exact device/model pairs | Two sequential results with provenance and textual disagreements; Codex verifies claims against source. |
 | `pair_diagnose` | None | Router/device health and recent local request stages, durations, and sanitized failure reasons; no prompts or tokens. |
-| `pair_download_plan` / `pair_download` / `pair_download_status` | Exact model and destination; optional estimate for unknown sizes; one-use plan ID, repeated `confirm_model`; job ID | A Hugging Face repository link with an unambiguous GGUF file can provide independently checked file size/revision. Local destination free space is checked with 10% headroom; remote storage and LM Studio's configured destination remain unverified. Catalog IDs require a caller-supplied estimate. LM Studio reports the job total only after starting. |
+| `pair_download_plan` / `pair_download` / `pair_download_status` | Exact model and destination; optional estimate for unknown sizes; one-use plan ID, repeated `confirm_model`; job ID | A Hugging Face repository link with an unambiguous GGUF file can provide independently checked file size/revision. Free space is checked with 10% headroom when the configured `models_path` matches the destination. Otherwise the actual storage path remains unverified. Catalog IDs require a caller-supplied estimate. LM Studio reports the job total only after starting. |
 | `pair_decide` / `pair_score` | State, Choice options or ordered Score levels, `allow_external=true` | Optional typed evaluation from **external** TypeSafe AI Jev; requires `TYPESAFE_API_KEY`. |
 
 The smart path requires at least one explicitly configured, online LM Studio device. It preserves pre-existing loaded instances. An instance loaded for a successful smart request is unloaded by default; an inference error or timeout leaves it loaded for inspection. Other applications can use the same LM Studio server, so Bridge cannot guarantee an instance is idle outside its own calls. Set `unload_after=false` when sharing a model with other clients.
@@ -273,7 +275,7 @@ codex plugin marketplace upgrade pair-bridge
 codex plugin add pair-bridge@pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.5.0 adds smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the new `pair-bridge` plugin ID.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.0 adds measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata. Version 0.5.0 added smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the `pair-bridge` plugin ID.
 
 ## For contributors
 

@@ -4,6 +4,7 @@ import shutil
 from urllib.parse import urlsplit
 
 import httpx
+import telemetry
 
 
 def model_files(model, quantization):
@@ -47,9 +48,19 @@ def model_files(model, quantization):
 
 
 def destination_space(device, destination, required_bytes):
-    """Inspect disk free space only when the target device is the local host."""
+    """Inspect free space on the local destination or an explicitly configured remote models path."""
     origin = urlsplit(device.get('base_url', ''))
-    if device.get('ssh_host') or origin.hostname not in ('127.0.0.1', 'localhost'):
+    if device.get('ssh_host'):
+        configured = device.get('models_path')
+        if not configured or configured.rstrip('\\/').casefold() != destination.rstrip('\\/').casefold():
+            return {'status': 'unknown', 'reason': 'Remote models_path is unconfigured or differs from the reviewed destination'}
+        disk = telemetry.sample(device).get('models_disk')
+        if not isinstance(disk, dict) or not isinstance(disk.get('free_bytes'), int):
+            return {'status': 'unknown', 'reason': 'Remote model disk space could not be measured'}
+        return {'status': 'enough' if disk['free_bytes'] >= required_bytes else 'insufficient',
+                'free_bytes': disk['free_bytes'], 'required_bytes': required_bytes,
+                'note': 'Disk path is explicitly configured in Bridge; LM Studio settings are not exposed by its API.'}
+    if origin.hostname not in ('127.0.0.1', 'localhost'):
         return {'status': 'unknown', 'reason': 'Remote storage path and free space are not exposed by LM Studio API'}
     path = Path(destination).expanduser()
     if not path.is_absolute():

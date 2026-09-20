@@ -44,6 +44,11 @@ def devices():
         cap = row.get('max_loaded_bytes')
         if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap <= 0):
             raise ValueError('max_loaded_bytes must be a positive integer')
+        models_path = row.get('models_path')
+        if models_path is not None and (not isinstance(models_path, str) or not models_path or len(models_path) > 512 or
+                                        any(ch in models_path for ch in '\r\n\x00') or
+                                        not (Path(models_path).is_absolute() or re.match(r'^[A-Za-z]:[\\/]', models_path))):
+            raise ValueError('models_path must be a short absolute path configured by the user')
         result[name] = dict(row, base_url=url.rstrip('/'))
     return result
 
@@ -188,7 +193,7 @@ def estimate_memory(device_id, model, context_length):
     return dict(values, context_length=context_length, source='lms load --estimate-only')
 
 
-def memory_preflight(device_id, rows, candidate, context_length, max_loaded_bytes):
+def memory_preflight(device_id, rows, candidate, context_length, max_loaded_bytes, capacity=None):
     """Estimate each running instance and the candidate at its actual/planned context."""
     if candidate['loaded_instances']:
         return {'status': 'already_loaded'}
@@ -207,12 +212,23 @@ def memory_preflight(device_id, rows, candidate, context_length, max_loaded_byte
         required = round(total * 1.1)
         if max_loaded_bytes is not None and required > max_loaded_bytes:
             raise ValueError('Device estimated memory limit would be exceeded; no model was loaded')
+        if isinstance(capacity, dict) and time.time() - capacity.get('checked_at', 0) <= 15:
+            available = capacity.get('memory', {}).get('available_bytes')
+            gpu_rows = capacity.get('gpu', {}).get('devices') or []
+            gpu_free = sum(g.get('free_bytes', 0) for g in gpu_rows)
+            # Compare incremental need with currently available capacity: existing loads already occupy memory.
+            system_needed = (max(incoming['total_bytes'] - incoming['gpu_bytes'], 2**30) if gpu_rows
+                             else incoming['total_bytes'])
+            if isinstance(available, int) and round(system_needed * 1.1) > available:
+                raise ValueError('Insufficient currently available system memory for this model and context')
+            if gpu_rows and round(incoming['gpu_bytes'] * 1.1) > gpu_free:
+                raise ValueError('Insufficient currently available GPU memory for this model and context')
         return {'status': 'estimated', 'candidate': incoming, 'loaded': current,
                 'estimated_total_bytes': total, 'required_with_headroom_bytes': required,
-                'max_loaded_bytes': max_loaded_bytes,
-                'note': 'CLI estimate, not measured free RAM/VRAM; leave headroom for the OS and other applications.'}
+                'max_loaded_bytes': max_loaded_bytes, 'capacity': capacity,
+                'note': 'CLI load estimate plus a separate live capacity sample when available; leave headroom for the OS and other applications.'}
     except ValueError as exc:
-        if max_loaded_bytes is not None or 'limit would be exceeded' in str(exc):
+        if max_loaded_bytes is not None or 'limit would be exceeded' in str(exc) or 'Insufficient currently available' in str(exc):
             raise
         return {'status': 'unknown', 'reason': str(exc),
                 'note': 'No configured memory cap; loading may still fail or evict another instance.'}

@@ -313,7 +313,8 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({t.name for t in tools}, {'pair_list', 'pair_ask', 'pair_devices', 'pair_load', 'pair_unload', 'pair_memory_plan',
                                                           'pair_smart_ask', 'pair_compare', 'pair_diagnose',
                                                           'pair_download_plan', 'pair_download', 'pair_download_status',
-                                                          'pair_decide', 'pair_score'})
+                                                          'pair_decide', 'pair_score', 'pair_benchmark', 'pair_benchmark_results',
+                                                          'pair_job_start', 'pair_job_status', 'pair_job_cancel', 'pair_job_recover'})
                 result = await session.call_tool('pair_ask', {'model':'model','prompt':'hello','max_tokens':-1})
                 self.assertTrue(result.isError)
 

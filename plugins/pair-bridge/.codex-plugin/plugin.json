@@ -1,6 +1,6 @@
 {
   "name": "pair-bridge",
-  "version": "0.5.0+codex.20260920093840",
+  "version": "0.6.0+codex.20260920130645",
   "description": "Use local models across configured devices from Codex and Oh My Pi through PAIR.",
   "author": {
     "name": "GermanMik"
