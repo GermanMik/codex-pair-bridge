@@ -1,27 +1,34 @@
 <div align="center">
 
-# PAIR Bridge
+# PAIR Bridge — Local Models for Codex
 
-### One `/pair` command for the models on all your devices
+### Your local models, ready when Codex needs them.
 
-## Your local models, one conversation with Codex.
+**An open-source MCP bridge for Codex, NVIDIA PAIR, and LM Studio.**<br>
+Discover models across devices · ask for a second opinion · compare answers · manage memory deliberately.
 
-[English](README.md) · [Русский](README.ru.md) · [Installation](#get-started) · [Troubleshooting](#troubleshooting)
+[Get started](#get-started) · [See how MCP works](#what-does-mcp-actually-do) · [Explore the tools](#tool-reference) · [Русский](README.ru.md)
 
 ![How Codex uses MCP tools to ask local models through PAIR](docs/assets/mcp-explained.png)
 
 [![Tests](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
+![MCP](https://img.shields.io/badge/MCP-bridge-6C63FF)
+![Local-first](https://img.shields.io/badge/models-local--first-5A9E50)
 
 </div>
 
-Ask a local model for a code review, a second opinion, or an alternative solution—without leaving your Codex task. **PAIR Bridge gives Codex tools for consulting PAIR and managing configured LM Studio devices.**
+**PAIR Bridge lets Codex consult your installed local models without leaving the current task.** It connects Codex to the PAIR router and to LM Studio devices you configure explicitly, including machines reachable over SSH/Tailscale.
 
-Type `/pair` and choose the **pair** skill, or mention `$pair`. Astra, Sol, and other tool-capable Codex models can then inspect your devices, load an installed model, ask it a bounded question, and unload the exact instance they started.
+| Discover | Ask & compare | Manage safely |
+| --- | --- | --- |
+| See which devices are online and which models are installed or loaded. | Request a bounded second opinion or compare two model answers. | Estimate memory at the intended context; load or unload exact instances. |
 
-> `/pair find a suitable model on pc, load it, and ask it to review this function`
+Type `/pair` and choose the **pair** skill, or mention `$pair`. Astra, Sol, and other tool-capable Codex models can then use these tools:
 
-The bridge never downloads a model just because a prompt names it. It first reads the live inventory, so a stale or nonexistent entry such as `gpt-oss-20b` is reported instead of being requested blindly.
+> `/pair find an installed model on pc, estimate memory for 8192 context tokens, and ask it to review this function`
+
+**Installed models first.** The bridge checks live inventory before asking or loading, so a missing model such as `gpt-oss-20b` is reported instead of being called blindly. Downloading new weights requires a separate, explicit plan and action.
 
 Independent community project. Not affiliated with or endorsed by OpenAI or NVIDIA.
 
