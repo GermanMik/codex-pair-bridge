@@ -262,7 +262,8 @@ def pair_list(device: str | None = None) -> dict:
     """List the current model IDs advertised by PAIR across its connected computers.
 
     With device, return installed models and loaded instances from that device.
-    Without device, return the PAIR routing catalog.
+    Without device, return the PAIR routing catalog. If that catalog is empty,
+    return installed models from configured online devices as an explicit fallback.
     kind_hint is inferred from the name, not authoritative. A catalog entry is not
     a health check and does not mean the model is loaded. Use an exact returned ID.
     """
@@ -273,7 +274,28 @@ def pair_list(device: str | None = None) -> dict:
                     'models': checked_models(device, rows),
                     'resources': resource_summary(rows, management.devices()[device].get('max_loaded_bytes')),
                     'source': 'LM Studio native API'}
-    return {'endpoint': BASE_URL, 'models': catalog(), 'notice': 'Catalog only; model availability must be confirmed by a successful request.'}
+    routed = catalog()
+    if routed:
+        return {'endpoint': BASE_URL, 'models': routed, 'source': 'PAIR routing catalog',
+                'notice': 'Catalog only; model availability must be confirmed by a successful request.'}
+    installed, errors = [], []
+    for name in management.devices():
+        try:
+            with management.client(name) as c:
+                rows = management.models(c)
+            for row in checked_models(name, rows):
+                installed.append({'id': row['key'], 'device': name, 'type': row['type'],
+                                  'kind_hint': 'chat_candidate' if row['type'] == 'llm' else row['type'],
+                                  'installed': True, 'loaded': bool(row['loaded_instances']),
+                                  'loaded_instances': row['loaded_instances'],
+                                  'max_context_length': row.get('max_context_length'),
+                                  'availability': row['availability']})
+        except ValueError:
+            errors.append({'device': name, 'status': 'offline'})
+    return {'endpoint': BASE_URL, 'models': installed, 'source': 'configured device inventory fallback',
+            'router_models': [], 'device_errors': errors,
+            'notice': ('PAIR routing catalog is empty. These models are installed, not router-advertised. '
+                       'Use pair_smart_ask, or pair_load followed by pair_ask with the returned device; no download is required.')}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

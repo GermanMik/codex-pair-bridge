@@ -225,7 +225,7 @@ Example arguments for `pair_ask` (replace the model ID):
 | Tool | Inputs | Returns |
 | --- | --- | --- |
 | `pair_devices` | None | Reachability, installed/loaded inventory, timestamped free RAM, NVIDIA VRAM and disk capacity for every configured device. |
-| `pair_list` | Optional `device` | PAIR catalog, or native inventory for one device. |
+| `pair_list` | Optional `device` | PAIR routing catalog, or native inventory for one device. If the router catalog is empty, it returns installed models from reachable configured devices with explicit device/load provenance. |
 | `pair_load` | `device`, `model`, optional `context_length` | Reused or newly loaded instance and its exact instance ID. |
 | `pair_memory_plan` | `device`, installed `model`, optional `context_length` | Read-only CLI estimate for a cold load, including already loaded instances at their actual contexts. |
 | `pair_unload` | `device`, `instance_id` | Confirmation that one exact instance is no longer observed. |
@@ -275,7 +275,7 @@ codex plugin marketplace upgrade pair-bridge
 codex plugin add pair-bridge@pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.1 fixes free-memory sampling when Bridge runs locally on Windows. Version 0.6.0 added measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata. Version 0.5.0 added smart selection, comparison, diagnostics, resource limits, OMP integration and optional Jev tools under the `pair-bridge` plugin ID.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.2 exposes installed device models when the PAIR router catalog is empty. Version 0.6.1 fixed free-memory sampling when Bridge runs locally on Windows. Version 0.6.0 added measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata.
 
 ## For contributors
 

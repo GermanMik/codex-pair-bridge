@@ -5,7 +5,7 @@ description: Use NVIDIA PAIR and configured LM Studio devices to inspect install
 
 # PAIR
 
-Use the bridge MCP tools. A bare `/pair` or `$pair` means inspect: call `pair_devices` and `pair_list`, then show device availability, installed model key, loaded state, context limit, check time, last request status, and offline devices. Do not mutate models for a bare invocation.
+Use the bridge MCP tools. A bare `/pair` or `$pair` means inspect: call `pair_devices` and `pair_list`, then show device availability, installed model key, loaded state, context limit, check time, last request status, and offline devices. Do not mutate models for a bare invocation. When the PAIR routing catalog is empty, `pair_list` falls back to installed models from configured devices; these entries are explicitly marked installed and may still be unloaded. Use their `device` with `pair_smart_ask`, or load and ask explicitly.
 
 For a task, inspect fresh inventories first. Select an appropriate installed LLM using its real type, size, context limit and loaded state. Never invent a model ID or assume catalog presence means loaded. Ask a focused question only if the device/model choice materially matters and the user has not delegated selection.
 

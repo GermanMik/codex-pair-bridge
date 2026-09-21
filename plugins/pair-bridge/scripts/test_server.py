@@ -93,6 +93,30 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No suitable installed'):
             server.select_model(rows, model='gpt-oss-20b')
 
+    def test_empty_router_catalog_falls_back_to_installed_devices(self):
+        rows = [{'key': 'qwen', 'display_name': 'Qwen', 'type': 'llm', 'size_bytes': 10,
+                 'max_context_length': 32768, 'loaded_instances': []}]
+        with patch.object(server, 'catalog', return_value=[]), \
+             patch.object(server.management, 'devices', return_value={'alfred': {}, 'offline': {}}), \
+             patch.object(server.management, 'client'), \
+             patch.object(server.management, 'models', side_effect=[rows, ValueError('offline')]):
+            result = server.pair_list()
+        self.assertEqual(result['source'], 'configured device inventory fallback')
+        self.assertEqual(result['models'][0]['id'], 'qwen')
+        self.assertEqual(result['models'][0]['device'], 'alfred')
+        self.assertTrue(result['models'][0]['installed'])
+        self.assertFalse(result['models'][0]['loaded'])
+        self.assertEqual(result['device_errors'], [{'device': 'offline', 'status': 'offline'}])
+
+    def test_nonempty_router_catalog_remains_authoritative(self):
+        routed = [{'id': 'loaded', 'kind_hint': 'chat_candidate'}]
+        with patch.object(server, 'catalog', return_value=routed), \
+             patch.object(server.management, 'devices') as devices:
+            result = server.pair_list()
+        self.assertEqual(result['models'], routed)
+        self.assertEqual(result['source'], 'PAIR routing catalog')
+        devices.assert_not_called()
+
     def test_checked_inventory_shows_load_state_and_last_result(self):
         rows = [{'key': 'warm', 'type': 'llm', 'max_context_length': 8192,
                  'loaded_instances': [{'id': 'warm-i'}], 'size_bytes': 100}]
