@@ -1,15 +1,15 @@
 <div align="center">
 
-# PAIR Bridge — Local Models for Codex
+# PAIR Bridge — Local Models for Compatible Tools
 
-### Your local models, ready when Codex needs them.
+### One bridge. Many tools. Your local models.
 
-**An open-source MCP bridge for Codex, NVIDIA PAIR, and LM Studio.**<br>
+**An open-source MCP bridge for compatible tools, NVIDIA PAIR, and LM Studio.**<br>
 Discover models across devices · ask for a second opinion · compare answers · manage memory deliberately.
 
 [Get started](#get-started) · [See how MCP works](#what-does-mcp-actually-do) · [Explore the tools](#tool-reference) · [Русский](README.ru.md)
 
-![PAIR Bridge connects Codex through MCP to local models via PAIR routing or direct LM Studio devices](docs/assets/mcp-explained.png)
+![Codex, Oh My Pi, and other compatible tools connect through PAIR Bridge to local models and devices](docs/assets/pair-bridge-architecture.svg)
 
 [![Tests](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/GermanMik/pair-bridge/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-mint.svg)](LICENSE)
@@ -18,7 +18,7 @@ Discover models across devices · ask for a second opinion · compare answers ·
 
 </div>
 
-**PAIR Bridge lets Codex consult your installed local models without leaving the current task.** It connects Codex to the PAIR router and to LM Studio devices you configure explicitly, including machines reachable over SSH/Tailscale.
+**PAIR Bridge lets compatible MCP clients use installed local models across configured devices. Codex and Oh My Pi are supported examples. Requests can route through PAIR or target configured LM Studio devices, including machines reachable over SSH/Tailscale.**
 
 | Discover | Ask & compare | Manage safely |
 | --- | --- | --- |
@@ -34,13 +34,13 @@ Independent community project. Not affiliated with or endorsed by OpenAI or NVID
 
 ## What does MCP actually do?
 
-**MCP means Model Context Protocol.** It is the interface through which Codex discovers tools and calls them. In this project, a small MCP server runs on your computer and exposes tools for discovery, model lifecycle, and inference.
+**MCP means Model Context Protocol.** It is the interface through which compatible clients discover and call tools. In this project, a small MCP server runs on your computer and exposes tools for discovery, model lifecycle, and inference.
 
 Think of the workflow as four jobs:
 
 | Component | Its job | Example |
 | --- | --- | --- |
-| **Codex** | Understand your task and use the returned answer. | “I need a second opinion on this function.” |
+| **Compatible client** | Understand your task and use the returned answer. | “I need a second opinion on this function.” |
 | **MCP bridge** | Expose discovery, lifecycle, and inference as tools. | Inspect a device, load a model, then call it. |
 | **PAIR** | Route requests when no device is selected. | Send the request to a connected model server. |
 | **Local model** | Generate an answer. | Return review comments to Codex. |
