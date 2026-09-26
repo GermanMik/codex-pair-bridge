@@ -186,6 +186,43 @@ The bridge runs on your computer and sends requests to **your configured PAIR en
 
 **The complete Codex conversation is not necessarily local.** Model answers return to Codex and follow your Codex/OpenAI data settings. PAIR and model servers may also keep their own logs. [Read the privacy note](PRIVACY.md).
 
+## Hermes Agent
+
+PAIR Bridge includes an OpenAI-compatible gateway for Hermes. It lists PAIR router models and chat models from the `devices` configured in `~/.pair-bridge.json`. Use `device/<device-id>/<model-key>` to target a specific computer; router models keep their original PAIR IDs.
+
+To start the gateway and register its provider automatically, run one command from the cloned repository root:
+
+```sh
+python3 plugins/pair-bridge/scripts/install_hermes.py
+```
+
+The installer writes settings through the Hermes CLI, leaves your current main model unchanged, and starts the gateway in the background. Then select PAIR Bridge with `hermes model` or `/model`. Hermes, `uv`, and an existing PAIR Bridge config must already be installed.
+
+Manual gateway launch (if you are not using the installer):
+
+```sh
+uv run --script ./plugins/pair-bridge/scripts/hermes_proxy.py
+```
+
+By default, the gateway listens only on `127.0.0.1:8765`. Add a provider to `~/.hermes/config.yaml`, keeping any existing entries:
+
+```yaml
+providers:
+  pair-bridge:
+    api: http://127.0.0.1:8765/v1
+    api_key: local
+    transport: openai_chat
+model:
+  provider: pair-bridge
+  default: device/pc/qwen/qwen3-8b
+  base_url: http://127.0.0.1:8765/v1
+  api_mode: chat_completions
+```
+
+Replace `pc` and the model key with IDs from your device configuration and `GET http://127.0.0.1:8765/v1/models`. Choose models with `hermes model` or `/model`. Device-qualified models go directly to that LM Studio device; unqualified IDs go through the PAIR router.
+
+Device models must be installed in LM Studio, with its API reachable from the gateway host. LM Studio may load a model on demand and consume memory; use the MCP Bridge tools for explicit loading and memory checks. The gateway accepts text chat-completion requests and emits OpenAI-compatible SSE when Hermes requests streaming. It binds to loopback by default. For network access, set `HERMES_PAIR_HOST` and `HERMES_PAIR_API_KEY` and expose the port only on a trusted network. Set `PAIR_BASE_URL` and `PAIR_API_KEY` for the router, as with the MCP server.
+
 ## Troubleshooting
 
 | What you see | What to check |
@@ -275,7 +312,7 @@ codex plugin marketplace upgrade pair-bridge
 codex plugin add pair-bridge@pair-bridge
 ```
 
-Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.6.2 exposes installed device models when the PAIR router catalog is empty. Version 0.6.1 fixed free-memory sampling when Bridge runs locally on Windows. Version 0.6.0 added measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata.
+Open a new task after updating so Codex discovers the `/pair` skill and current MCP tools. Version 0.7.0 adds a one-command Hermes setup and OpenAI-compatible PAIR gateway with device-qualified model IDs. Version 0.6.2 exposes installed device models when the PAIR router catalog is empty. Version 0.6.1 fixed free-memory sampling when Bridge runs locally on Windows. Version 0.6.0 added measured device capacity, local benchmark-based routing, and cancellable background requests with recovery metadata.
 
 ## For contributors
 
