@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="field" x1="60" y1="36" x2="455" y2="478" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B3151"/>
+      <stop offset="1" stop-color="#06172D"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="96" y1="88" x2="419" y2="424" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#64E8CB"/>
+      <stop offset="1" stop-color="#6AA5FF"/>
+    </linearGradient>
+    <radialGradient id="center" cx="0" cy="0" r="1" gradientTransform="matrix(0 150 -150 0 256 230)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#145371"/>
+      <stop offset="1" stop-color="#0A2945"/>
+    </radialGradient>
+  </defs>
+  <circle cx="256" cy="256" r="248" fill="#041328"/>
+  <circle cx="256" cy="256" r="235" fill="url(#field)" stroke="url(#ring)" stroke-width="10"/>
+  <circle cx="256" cy="256" r="202" stroke="#7BB8E3" stroke-opacity=".13" stroke-width="2"/>
+  <circle cx="256" cy="256" r="160" fill="url(#center)" stroke="#6FE4CE" stroke-opacity=".58" stroke-width="5"/>
+
+  <!-- Two tools and two device paths meet at one bridge hub. -->
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M143 193h78l35 63m113-63h-78l-35 63m-113 126h78l35-63m113 63h-78l-35-63" stroke="#69E7CE" stroke-width="18"/>
+    <path d="M143 193h78m113 0h-78m-113 126h78m113 0h-78" stroke="#B8F2E6" stroke-opacity=".58" stroke-width="5"/>
+  </g>
+  <circle cx="134" cy="193" r="28" fill="#A6E94D" stroke="#071B30" stroke-width="9"/>
+  <circle cx="378" cy="193" r="28" fill="#A6E94D" stroke="#071B30" stroke-width="9"/>
+  <circle cx="134" cy="319" r="28" fill="#70ABFF" stroke="#071B30" stroke-width="9"/>
+  <circle cx="378" cy="319" r="28" fill="#70ABFF" stroke="#071B30" stroke-width="9"/>
+  <circle cx="256" cy="256" r="49" fill="#0A2038" stroke="#ECFAFF" stroke-width="10"/>
+  <circle cx="256" cy="256" r="21" fill="#A6E94D"/>
+  <circle cx="256" cy="256" r="8" fill="#F2FBFF"/>
+</svg>
