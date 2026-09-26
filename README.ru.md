@@ -316,6 +316,8 @@ codex plugin add pair-bridge@pair-bridge
 
 ## Разработчикам
 
+Инструкции по окружению, тестам и первому вкладу собраны в [руководстве участника](CONTRIBUTING.ru.md).
+
 ```sh
 cd plugins/pair-bridge
 uv run --locked --script ./scripts/server.py --self-test

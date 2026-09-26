@@ -316,6 +316,8 @@ Open a new task after updating so Codex discovers the `/pair` skill and current 
 
 ## For contributors
 
+See the [Contributor Guide](CONTRIBUTING.md) for setup, tests, project structure, and first contributions.
+
 ```sh
 cd plugins/pair-bridge
 uv run --locked --script ./scripts/server.py --self-test

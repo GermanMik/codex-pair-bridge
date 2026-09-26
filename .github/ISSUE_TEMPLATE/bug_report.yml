@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible problem without sharing private prompts or credentials.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove API keys, private prompts, device addresses, and personal data from logs before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: PAIR Bridge version
+      placeholder: 0.7.0
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client and version
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 / Windows 11 / Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Relevant setup
+      description: Include PAIR and LM Studio versions, device/model state, and whether the request used PAIR routing or a direct device. Do not include secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized error or diagnostics
+      description: Redact tokens, private prompts, hostnames, and local paths.
+    validations:
+      required: false
